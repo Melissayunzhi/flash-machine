@@ -35,7 +35,8 @@ const state = {
   field:{ key:'liquid', contrast:1, lift:0, levels:0, invert:false, detail:800, format:'square' },
   fieldP:{}, fieldAll:{},
   seed:1337, running:null, inkPct:0, keepRender:false, customFn:null,
-  pins:[], sheet:{ cols:3, gap:40, margin:60, width:2000 }
+  pins:[], sheet:{ cols:3, gap:40, margin:60, width:2000 },
+  layers:[]
 };
 
 function mulberry32(a){
@@ -306,6 +307,13 @@ const EFFECTS = {
     { k:'edge',  l:'Edge softness', t:'range', min:0, max:80, step:1, v:0 },
     { k:'block', l:'Pixel size', t:'range', min:1, max:48, step:1, v:1, fmt:v=>v+' px' }
   ]},
+  pixelate: { label:'Pixelate', note:'The photo dropped to a grid of flat blocks, each one the average tone underneath. Open the gap for a visible pixel grid, or posterise for a stepped, retro-console look. Exports as vector blocks.', controls:[
+    { k:'size',   l:'Block size', t:'range', min:2, max:120, step:1, v:18, fmt:v=>v+' px' },
+    { k:'gap',    l:'Grid gap', t:'range', min:0, max:40, step:0.5, v:0, fmt:v=>v.toFixed(1)+' px' },
+    { k:'levels', l:'Posterise', t:'range', min:0, max:16, step:1, v:0, fmt:v=>v<2?'off':v+' steps' },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) },
+    { k:'cut',    l:'Skip blocks lighter than', t:'range', min:0, max:255, step:1, v:255 }
+  ]},
   ordered: { label:'Ordered dither', note:'A fixed screen laid over the whole picture. Bayer scatters the dots, clustered dot grows them like print, lines give you a stripe screen. Pixel size averages the photo into blocks first, so every mark comes out whole.', controls:[
     { k:'pattern', l:'Screen', t:'select', v:'bayer', opts:[['bayer','Bayer'],['cluster','Clustered dot'],['lines','Lines'],['diagonal','Diagonal'],['cross','Crosshatch'],['random','Random noise']] },
     { k:'size',   l:'Screen size', t:'range', min:2, max:16, step:1, v:8, fmt:v=>v+' × '+v },
@@ -325,7 +333,7 @@ const EFFECTS = {
   halftone: { label:'Screen', note:'A grid of marks sized by the tone underneath. Bars join up into continuous lines, which is the default, and the grid angle turns the whole field. Benday staggers the rows. Everything here exports as vector.', controls:[
     { k:'count', l:'Cells down the sheet', t:'range', min:8, max:400, step:1, v:90 },
     { k:'grid',  l:'Grid', t:'select', v:'regular', opts:[['regular','Regular'],['benday','Benday, staggered'],['hex','Hexagonal']] },
-    { k:'shape', l:'Mark', t:'select', v:'bar', opts:[['bar','Bar, joins into lines'],['dot','Round dot'],['square','Square'],['diamond','Diamond'],['cross','Cross'],['ring','Ring'],['line','Continuous line']] },
+    { k:'shape', l:'Mark', t:'select', v:'bar', opts:[['bar','Bar, joins into lines'],['dot','Round dot'],['square','Square'],['diamond','Diamond'],['cross','Cross'],['ring','Ring'],['line','Continuous line'],['star','Star'],['sparkle','Sparkle'],['heart','Heart'],['cloud','Cloud']] },
     { k:'angle', l:'Grid angle', t:'range', min:0, max:180, step:1, v:0, fmt:v=>v+'°' },
     { k:'scale', l:'Mark weight', t:'range', min:0.1, max:2.5, step:0.05, v:1, fmt:v=>v.toFixed(2) },
     { k:'min',   l:'Smallest mark', t:'range', min:0, max:100, step:1, v:7, fmt:v=>v+'%' },
@@ -369,6 +377,17 @@ const EFFECTS = {
     { k:'angle',   l:'Rotate', t:'range', min:0, max:360, step:1, v:0, fmt:v=>v+'°' },
     { k:'gamma',   l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
   ]},
+  rings: { label:'Rings', note:'Concentric rings from the centre, each one thickening where the photo is dark — growth rings, vinyl grooves, sonar. A cousin of the spiral screen, but broken into separate circles.', controls:[
+    { k:'spacing', l:'Ring spacing', t:'range', min:3, max:60, step:0.5, v:10, fmt:v=>v.toFixed(1)+' px' },
+    { k:'wmin',    l:'Thinnest', t:'range', min:0, max:6, step:0.05, v:0.3, fmt:v=>v.toFixed(2)+' px' },
+    { k:'wmax',    l:'Thickest', t:'range', min:0.5, max:30, step:0.5, v:6, fmt:v=>v.toFixed(1)+' px' },
+    { k:'res',     l:'Circumference detail', t:'range', min:1, max:10, step:0.5, v:2, fmt:v=>v+' px' },
+    { k:'crop',    l:'Shape', t:'select', v:'circle', opts:[['sheet','Fill the sheet'],['circle','Crop to a disc']] },
+    { k:'outer',   l:'Disc size', t:'range', min:10, max:145, step:1, v:94, fmt:v=>v+'%' },
+    { k:'spin',    l:'Rotate', t:'range', min:0, max:360, step:1, v:0, fmt:v=>v+'°' },
+    { k:'cut',     l:'Skip lighter than', t:'range', min:0, max:255, step:1, v:255 },
+    { k:'gamma',   l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
+  ]},
   stitch: { label:'Cross stitch', note:'Counted stitches on a square count. Light cells get a single half stitch, dark cells get the full cross.', controls:[
     { k:'count',  l:'Stitches down the sheet', t:'range', min:10, max:200, step:1, v:52 },
     { k:'angle',  l:'Cloth angle', t:'range', min:0, max:180, step:1, v:0, fmt:v=>v+'°' },
@@ -377,6 +396,34 @@ const EFFECTS = {
     { k:'skip',   l:'Bare cloth below', t:'range', min:0, max:100, step:1, v:12, fmt:v=>v+'%' },
     { k:'weave',  l:'Weight follows tone', t:'check', v:true },
     { k:'cloth',  l:'Show the cloth grid', t:'check', v:false }
+  ]},
+  mosaic: { label:'Mosaic', note:'Irregular tiles set by hand, each one filled with the tone underneath and separated by grout. Raise irregularity for a rougher, stained-glass set.', controls:[
+    { k:'size',   l:'Tile size', t:'range', min:6, max:120, step:1, v:28, fmt:v=>v+' px' },
+    { k:'jitter', l:'Irregularity', t:'range', min:0, max:100, step:1, v:35, fmt:v=>v+'%' },
+    { k:'grout',  l:'Grout width', t:'range', min:0, max:12, step:0.5, v:2, fmt:v=>v.toFixed(1)+' px' },
+    { k:'groutStyle', l:'Grout', t:'select', v:'gap', opts:[['gap','Gap, no ink'],['ink','Ink, dark seams']] },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) },
+    { k:'cut',    l:'Skip tiles lighter than', t:'range', min:0, max:255, step:1, v:255 }
+  ]},
+  lace: { label:'Lace', note:'A net of eyelets and threads, thickest where the photo is darkest. Turn petals to zero for plain pearls, or up for a fuller filigree.', controls:[
+    { k:'count',  l:'Cells down the sheet', t:'range', min:8, max:200, step:1, v:44 },
+    { k:'angle',  l:'Grid angle', t:'range', min:0, max:180, step:1, v:0, fmt:v=>v+'°' },
+    { k:'scale',  l:'Motif size', t:'range', min:0.2, max:1.4, step:0.02, v:0.9, fmt:v=>v.toFixed(2) },
+    { k:'min',    l:'Smallest motif', t:'range', min:0, max:100, step:1, v:20, fmt:v=>v+'%' },
+    { k:'petals', l:'Petals', t:'range', min:0, max:12, step:1, v:6 },
+    { k:'weight', l:'Thread weight', t:'range', min:0.2, max:4, step:0.1, v:0.9, fmt:v=>v.toFixed(1)+' px' },
+    { k:'cut',    l:'Skip cells lighter than', t:'range', min:0, max:255, step:1, v:235 },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
+  ]},
+  graph: { label:'Graph', note:'Nodes placed by darkness, wired together like a network diagram or a state graph. Link distance sets the mesh, max links keeps it from turning into a hairball.', controls:[
+    { k:'gap',    l:'Node spacing', t:'range', min:4, max:60, step:1, v:16, fmt:v=>v+' px' },
+    { k:'count',  l:'Node limit', t:'range', min:50, max:6000, step:50, v:900 },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:4, step:0.05, v:1.2, fmt:v=>v.toFixed(2) },
+    { k:'cut',    l:'Ignore lighter than', t:'range', min:0, max:255, step:1, v:245 },
+    { k:'link',   l:'Link distance', t:'range', min:10, max:220, step:2, v:70, fmt:v=>v+' px' },
+    { k:'links',  l:'Max links per node', t:'range', min:1, max:8, step:1, v:3 },
+    { k:'nodeSize', l:'Node size', t:'range', min:0.5, max:8, step:0.1, v:2, fmt:v=>v.toFixed(1)+' px' },
+    { k:'weight', l:'Line weight', t:'range', min:0.2, max:4, step:0.1, v:0.8, fmt:v=>v.toFixed(1)+' px' }
   ]},
   ascii: { label:'ASCII', note:'Every cell becomes the character closest to its tone. Write your own ramp if you want it in your own alphabet. Exports as real text you can still edit.', controls:[
     { k:'cols',  l:'Columns', t:'range', min:10, max:300, step:1, v:80 },
@@ -392,7 +439,17 @@ const EFFECTS = {
     { k:'jitter',l:'Position wobble', t:'range', min:0, max:100, step:1, v:0 },
     { k:'flip',  l:'Dark characters on light', t:'check', v:true }
   ]},
-  stipple: { label:'Stipple', note:'Dots placed by darkness. Even spacing pushes them apart so nothing clumps, which is what dotwork actually wants. The best plotter export in here.', controls:[
+  scope: { label:'Oscilloscope', note:'Each row becomes a trace, rising and falling with the tone underneath — a readout off a signal, not a picture. Turn on the graticule for the screen grid.', controls:[
+    { k:'channels', l:'Channels', t:'range', min:1, max:16, step:1, v:6 },
+    { k:'amp',    l:'Amplitude', t:'range', min:0, max:100, step:1, v:70, fmt:v=>v+'%' },
+    { k:'res',    l:'Trace resolution', t:'range', min:1, max:20, step:1, v:3, fmt:v=>v+' px' },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) },
+    { k:'weight', l:'Trace weight', t:'range', min:0.3, max:5, step:0.1, v:1.3, fmt:v=>v.toFixed(1)+' px' },
+    { k:'grid',   l:'Graticule grid', t:'check', v:true },
+    { k:'gridCols', l:'Grid columns', t:'range', min:2, max:20, step:1, v:10 }
+  ]},
+  stipple: { label:'Stipple', note:'A stamp placed by darkness. Even spacing pushes them apart so nothing clumps, which is what dotwork actually wants. Swap the stamp for a custom dither shape. The best plotter export in here.', controls:[
+    { k:'shape',  l:'Stamp', t:'select', v:'circle', opts:[['circle','Circle'],['square','Square'],['diamond','Diamond'],['cross','Cross'],['star','Star'],['sparkle','Sparkle'],['heart','Heart'],['cloud','Cloud']] },
     { k:'spacing',l:'Placement', t:'select', v:'even', opts:[['even','Even spacing'],['scatter','Free scatter']] },
     { k:'gap',    l:'Closest spacing', t:'range', min:1, max:40, step:0.5, v:4, fmt:v=>v.toFixed(1)+' px' },
     { k:'count',  l:'Dot limit', t:'range', min:2000, max:400000, step:1000, v:120000, fmt:v=>(v/1000)+'k' },
@@ -494,6 +551,38 @@ const KERNELS = {
   fan:      { div:16, k:[[1,0,7],[-2,1,1],[-1,1,3],[0,1,5]] }
 };
 
+/* ============================================================
+   STAMP SHAPES
+   A small library of normalised (-1..1) outlines shared by any
+   treatment that places a mark by tone — the "dither shape".
+   ============================================================ */
+const STAMP_SHAPES = {
+  circle: () => { const n=16, pts=[]; for(let i=0;i<n;i++){ const a=i/n*TAU; pts.push([Math.cos(a),Math.sin(a)]); } return pts; },
+  square: () => [[-1,-1],[1,-1],[1,1],[-1,1]],
+  diamond: () => [[0,-1],[1,0],[0,1],[-1,0]],
+  cross: () => { const t=0.34; return [[-t,-1],[t,-1],[t,-t],[1,-t],[1,t],[t,t],[t,1],[-t,1],[-t,t],[-1,t],[-1,-t],[-t,-t]]; },
+  star: () => { const spikes=5, pts=[]; for(let i=0;i<spikes*2;i++){ const a=i/(spikes*2)*TAU - Math.PI/2; const r=(i%2===0)?1:0.42; pts.push([Math.cos(a)*r, Math.sin(a)*r]); } return pts; },
+  sparkle: () => { const spikes=4, pts=[]; for(let i=0;i<spikes*2;i++){ const a=i/(spikes*2)*TAU; const r=(i%2===0)?1:0.16; pts.push([Math.cos(a)*r, Math.sin(a)*r]); } return pts; },
+  heart: () => { const n=28, pts=[]; for(let i=0;i<n;i++){ const t=i/n*TAU; const x=16*Math.pow(Math.sin(t),3); const y=-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t)); pts.push([x/17, y/17]); } return pts; },
+  cloud: () => { const n=24, pts=[]; for(let i=0;i<n;i++){ const a=i/n*TAU; const bump=1+0.18*Math.sin(a*3+0.6)+0.12*Math.sin(a*5-1.1); pts.push([Math.cos(a)*bump, Math.sin(a)*bump*0.72]); } return pts; }
+};
+const STAMP_CACHE = {};
+function stampPoints(shape){
+  if (!STAMP_CACHE[shape]) STAMP_CACHE[shape] = (STAMP_SHAPES[shape] || STAMP_SHAPES.circle)();
+  return STAMP_CACHE[shape];
+}
+// absolute canvas-space points for a stamp at (cx,cy) with radius r
+function stampAbsPoints(shape, cx, cy, r){
+  return stampPoints(shape).map(([x,y]) => [cx+x*r, cy+y*r]);
+}
+function fillStamp(shape, cx, cy, r){
+  const pts = stampPoints(shape);
+  vctx.beginPath();
+  pts.forEach(([x,y],i) => { const px=cx+x*r, py=cy+y*r; i===0 ? vctx.moveTo(px,py) : vctx.lineTo(px,py); });
+  vctx.closePath();
+  vctx.fill();
+}
+
 /* ---------- stroke plumbing shared by the line treatments ---------- */
 function strokePts(pts, w){
   if (pts.length < 2) return;
@@ -515,6 +604,34 @@ function fxThreshold(g,w,h,o){
     if (t > 0) mask[i] = Math.round(t*255);
   }
   blitMask(mask, c.w, c.h, b, w, h);
+}
+
+function fxPixelate(g,w,h,o){
+  const b = Math.max(1, Math.round(o.size));
+  const c = coarsen(g,w,h,b);
+  const gap = clamp(o.gap, 0, b-0.5);
+  const steps = o.levels >= 2 ? Math.round(o.levels) : 0;
+  const W = c.w*b, H = c.h*b;
+  beginCanvas(W,H);
+  const items = [];
+  const sz = b - gap;
+  vctx.fillStyle = '#000';
+  for (let y=0; y<c.h; y++){
+    for (let x=0; x<c.w; x++){
+      const avg = c.g[y*c.w+x];
+      if (avg > o.cut) continue;
+      let t = Math.pow(1 - avg/255, o.gamma);
+      if (steps) t = Math.round(t*(steps-1))/(steps-1);
+      const a = clamp(t,0,1);
+      if (a <= 0.004 || sz <= 0) continue;
+      vctx.fillStyle = a >= 0.99 ? '#000' : 'rgba(0,0,0,'+a.toFixed(3)+')';
+      const px = x*b + gap/2, py = y*b + gap/2;
+      vctx.fillRect(px, py, sz, sz);
+      items.push([px, py, sz, sz, a]);
+    }
+  }
+  vctx.fillStyle = '#000';
+  state.vector = { kind:'rects', w:W, h:H, items };
 }
 
 function fxOrdered(g,w,h,o){
@@ -676,6 +793,9 @@ function fxScreen(g,w,h,o){
         vctx.lineWidth = lw;
         vctx.beginPath(); vctx.arc(px,py,Math.max(sz-lw/2,0.2),0,TAU); vctx.stroke();
         items.push({ t:'ring', x:px, y:py, r:Math.max(sz-lw/2,0.2), w:lw });
+      } else if (STAMP_SHAPES[o.shape]){
+        fillStamp(o.shape, px, py, sz);
+        items.push({ p: stampAbsPoints(o.shape, px, py, sz) });
       }
     }
   }
@@ -714,6 +834,74 @@ function fxCrosshatch(g,w,h,o){
   }
   vctx.lineCap = 'round';
   state.vector = { kind:'segs', w, h, items };
+}
+
+/* ---------- mosaic ---------- */
+function fxMosaic(g,w,h,o){
+  beginCanvas(w,h);
+  const cell = Math.max(4, o.size);
+  const jitter = clamp(o.jitter,0,100)/100;
+  const grout = o.grout;
+  const gamma = o.gamma;
+  const groutInk = o.groutStyle === 'ink';
+  const salt = (state.seed>>>0);
+  const seedCache = new Map();
+  function hash(cx,cy,s){
+    let n = Math.imul(cx|0, 374761393) + Math.imul(cy|0, 668265263) + Math.imul(s|0, 2246822519) + Math.imul(salt, 3266489917);
+    n = Math.imul(n ^ (n>>>13), 1274126177);
+    return ((n ^ (n>>>16))>>>0) / 4294967296;
+  }
+  function seedPos(cx,cy){
+    const key = cx+','+cy;
+    let v = seedCache.get(key);
+    if (!v){
+      const hx = hash(cx,cy,1), hy = hash(cx,cy,2);
+      v = [ (cx+0.5+(hx-0.5)*jitter)*cell, (cy+0.5+(hy-0.5)*jitter)*cell ];
+      seedCache.set(key, v);
+    }
+    return v;
+  }
+  function nearest(px,py){
+    const cx0 = Math.floor(px/cell), cy0 = Math.floor(py/cell);
+    let best=Infinity, best2=Infinity, bx=0, by=0;
+    for (let dy=-1; dy<=1; dy++){
+      for (let dx=-1; dx<=1; dx++){
+        const cx=cx0+dx, cy=cy0+dy;
+        const s = seedPos(cx,cy);
+        const ddx = px-s[0], ddy = py-s[1], d2 = ddx*ddx+ddy*ddy;
+        if (d2<best){ best2=best; best=d2; bx=cx; by=cy; }
+        else if (d2<best2) best2=d2;
+      }
+    }
+    return { key: bx+','+by, d:Math.sqrt(best), d2:Math.sqrt(best2) };
+  }
+  const sums = new Map(), counts = new Map();
+  const stride = Math.max(1, Math.floor(Math.min(w,h)/500));
+  for (let y=0; y<h; y+=stride){
+    for (let x=0; x<w; x+=stride){
+      const n = nearest(x,y);
+      sums.set(n.key, (sums.get(n.key)||0) + g[y*w+x]);
+      counts.set(n.key, (counts.get(n.key)||0) + 1);
+    }
+  }
+  const img = inkImage(w,h), d = img.data;
+  for (let y=0; y<h; y++){
+    for (let x=0; x<w; x++){
+      const n = nearest(x,y);
+      const i = y*w+x;
+      if (n.d2 - n.d < grout){
+        if (groutInk) put(d,i,255);
+        continue;
+      }
+      const avg = counts.has(n.key) ? sums.get(n.key)/counts.get(n.key) : g[i];
+      if (avg > o.cut) continue;
+      const tone = Math.pow(1 - avg/255, gamma);
+      const a = Math.round(clamp(tone,0,1)*255);
+      if (a > 2) put(d,i,a);
+    }
+  }
+  vctx.putImageData(img,0,0);
+  state.vector = null;
 }
 
 function fxEngrave(g,w,h,o){
@@ -833,10 +1021,15 @@ function fxRidge(g,w,h,o){
 }
 
 /* ---------- dot treatments ---------- */
-function stippleDot(x,y,r,items){
-  if (r < 0.6) vctx.fillRect(x-r,y-r,r*2,r*2);
-  else { vctx.beginPath(); vctx.arc(x,y,r,0,TAU); vctx.fill(); }
-  items.push([x,y,r]);
+function stippleDot(x,y,r,items,shape){
+  if (!shape || shape === 'circle'){
+    if (r < 0.6) vctx.fillRect(x-r,y-r,r*2,r*2);
+    else { vctx.beginPath(); vctx.arc(x,y,r,0,TAU); vctx.fill(); }
+    items.push([x,y,r]);
+  } else {
+    fillStamp(shape, x, y, r);
+    items.push({ p: stampAbsPoints(shape, x, y, r) });
+  }
 }
 
 function fxStipple(g,w,h,o){
@@ -888,7 +1081,7 @@ function fxStipple(g,w,h,o){
       const dia = o.auto ? gap*0.95 : o.dot;
       const wob = 1 + (o.wobble/100)*(Math.random()-0.5)*1.6;
       const r = dia*0.5*(1 + (o.sizevar/100)*(clamp(t,0,1)-0.5)*1.6)*wob;
-      if (r > 0) stippleDot(x,y,r,items);
+      if (r > 0) stippleDot(x,y,r,items,o.shape);
       placed++;
     };
     const seed = () => {
@@ -940,11 +1133,11 @@ function fxStipple(g,w,h,o){
       const wob = 1 + (o.wobble/100)*(Math.random()-0.5)*1.6;
       const r = o.dot*0.5*(1 + (o.sizevar/100)*(tone-0.5)*1.6)*wob;
       if (r <= 0) continue;
-      stippleDot(x,y,r,items);
+      stippleDot(x,y,r,items,o.shape);
       placed++;
     }
   }
-  state.vector = { kind:'circles', w, h, items };
+  state.vector = { kind: (o.shape && o.shape !== 'circle') ? 'marks' : 'circles', w, h, items };
 }
 
 function fxBurn(g,w,h,o){
@@ -970,6 +1163,94 @@ function fxBurn(g,w,h,o){
     placed++;
   }
   state.vector = { kind:'circles', w, h, items };
+}
+
+/* ---------- graph: nodes by darkness, wired to their neighbours ---------- */
+function fxGraph(g,w,h,o){
+  beginCanvas(w,h);
+  const gap = o.gap, cell = Math.max(1.5, gap);
+  const gw = Math.ceil(w/cell)+1, gh = Math.ceil(h/cell)+1;
+  const bins = new Array(gw*gh);
+  const nodes = [];
+  const total = o.count, maxTries = total*40;
+  let placed = 0, tries = 0;
+
+  const fits = (x,y) => {
+    const bx0 = (x/cell)|0, by0 = (y/cell)|0;
+    for (let by=by0-1; by<=by0+1; by++){
+      if (by < 0 || by >= gh) continue;
+      const row = by*gw;
+      for (let bx=bx0-1; bx<=bx0+1; bx++){
+        if (bx < 0 || bx >= gw) continue;
+        const list = bins[row+bx];
+        if (!list) continue;
+        for (const j of list){
+          const dx = nodes[j].x-x, dy = nodes[j].y-y;
+          if (dx*dx+dy*dy < gap*gap) return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  while (placed < total && tries < maxTries){
+    tries++;
+    const x = Math.random()*w, y = Math.random()*h;
+    const lum = g[(y|0)*w + (x|0)];
+    if (lum > o.cut) continue;
+    const tone = Math.pow(1 - lum/255, o.gamma);
+    if (Math.random() > tone) continue;
+    if (!fits(x,y)) continue;
+    const bi = ((y/cell)|0)*gw + ((x/cell)|0);
+    if (bins[bi]) bins[bi].push(nodes.length); else bins[bi] = [nodes.length];
+    nodes.push({ x, y });
+    placed++;
+  }
+
+  const linkR = o.link, linkR2 = linkR*linkR, maxLinks = Math.round(o.links);
+  const seen = new Set();
+  const items = [];
+  vctx.lineWidth = o.weight;
+  vctx.lineCap = 'round';
+  for (let i=0; i<nodes.length; i++){
+    const a = nodes[i];
+    const bx0=(a.x/cell)|0, by0=(a.y/cell)|0, span=Math.ceil(linkR/cell);
+    const cand = [];
+    for (let by=by0-span; by<=by0+span; by++){
+      if (by < 0 || by >= gh) continue;
+      const row = by*gw;
+      for (let bx=bx0-span; bx<=bx0+span; bx++){
+        if (bx < 0 || bx >= gw) continue;
+        const list = bins[row+bx];
+        if (!list) continue;
+        for (const j of list){
+          if (j === i) continue;
+          const b = nodes[j], dx=b.x-a.x, dy=b.y-a.y, d2=dx*dx+dy*dy;
+          if (d2 <= linkR2) cand.push([j,d2]);
+        }
+      }
+    }
+    cand.sort((p,q) => p[1]-q[1]);
+    for (let k=0; k<Math.min(maxLinks, cand.length); k++){
+      const j = cand[k][0];
+      const key = i<j ? i+'_'+j : j+'_'+i;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const b = nodes[j];
+      vctx.beginPath(); vctx.moveTo(a.x,a.y); vctx.lineTo(b.x,b.y); vctx.stroke();
+      items.push({ t:'seg', p:[a.x,a.y,b.x,b.y], w:o.weight });
+    }
+  }
+
+  const nr = o.nodeSize;
+  vctx.fillStyle = '#000';
+  nodes.forEach(n => {
+    if (nr < 0.6) vctx.fillRect(n.x-nr, n.y-nr, nr*2, nr*2);
+    else { vctx.beginPath(); vctx.arc(n.x,n.y,nr,0,TAU); vctx.fill(); }
+    items.push({ t:'circle', x:n.x, y:n.y, r:nr });
+  });
+
+  state.vector = { kind:'marks', w, h, items };
 }
 
 /* ---------- outline treatments ---------- */
@@ -1166,6 +1447,51 @@ function fxSpiral(g,w,h,o){
   state.vector = { kind:'strokes', w, h, items };
 }
 
+/* ---------- rings: concentric circles, thickness set by tone ---------- */
+function fxRings(g,w,h,o){
+  beginCanvas(w,h);
+  const items = [];
+  const cx = w/2, cy = h/2;
+  const disc = o.crop === 'circle';
+  const maxR = disc ? Math.min(w,h)/2 * (o.outer/100) : Math.hypot(w,h)/2;
+  const spacing = o.spacing;
+  const spin = o.spin*Math.PI/180;
+  vctx.lineCap = 'butt';
+  for (let r=spacing; r<maxR; r+=spacing){
+    const n = Math.max(24, Math.round(TAU*r/Math.max(1,o.res)));
+    let run = [], runW = -1;
+    const flush = () => {
+      if (run.length > 1 && runW > 0.04){
+        vctx.lineWidth = runW;
+        vctx.beginPath();
+        vctx.moveTo(run[0][0], run[0][1]);
+        for (let i=1; i<run.length; i++) vctx.lineTo(run[i][0], run[i][1]);
+        vctx.stroke();
+        items.push({ p:run, w:runW });
+      }
+      run = [];
+    };
+    for (let i=0; i<=n; i++){
+      const a = i/n*TAU + spin;
+      const px = cx+Math.cos(a)*r, py = cy+Math.sin(a)*r;
+      if (px<0 || py<0 || px>=w || py>=h){ flush(); runW=-1; continue; }
+      const lum = sample(g,w,h,px,py);
+      if (lum > o.cut){ flush(); runW=-1; continue; }
+      const tone = Math.pow(1 - lum/255, o.gamma);
+      const lw = clamp(o.wmin + tone*(o.wmax-o.wmin), 0, 40);
+      if (Math.abs(lw-runW) > 1e-6){
+        const tail = run.length ? run[run.length-1] : null;
+        flush();
+        runW = lw;
+        if (tail) run.push(tail);
+      }
+      run.push([px,py]);
+    }
+    flush();
+  }
+  state.vector = { kind:'strokes', w, h, items };
+}
+
 /* ---------- cross stitch ---------- */
 function fxStitch(g,w,h,o){
   beginCanvas(w,h);
@@ -1215,6 +1541,73 @@ function fxStitch(g,w,h,o){
     }
   }
   state.vector = { kind:'segs', w, h, items };
+}
+
+/* ---------- lace ---------- */
+function fxLace(g,w,h,o){
+  beginCanvas(w,h);
+  const items = [];
+  const cellU = Math.max(6, h/Math.round(o.count));
+  const rad = o.angle*Math.PI/180, cs = Math.cos(rad), sn = Math.sin(rad);
+  const [u0,u1,v0,v1,cx,cy] = latticeBounds(w,h,cs,sn,cellU);
+  const pos = (u,v) => [cx + u*cellU*cs - v*cellU*sn, cy + u*cellU*sn + v*cellU*cs];
+  const info = new Map();
+  const at = (u,v) => {
+    const key = u+','+v;
+    if (info.has(key)) return info.get(key);
+    const [px,py] = pos(u,v);
+    let rec = null;
+    if (px>=0 && py>=0 && px<w && py<h){
+      const lum = sample(g,w,h,px,py);
+      if (lum <= o.cut){
+        const tone = Math.pow(1 - lum/255, o.gamma);
+        const sz = Math.max(o.min/100 * cellU*0.5, tone * cellU*0.5 * o.scale);
+        if (sz > 0.3) rec = { px, py, sz };
+      }
+    }
+    info.set(key, rec);
+    return rec;
+  };
+  const addStroke = pts => { strokePts(pts, o.weight); items.push({ p:pts, w:o.weight }); };
+  const ring = (px,py,r) => {
+    const pts = [];
+    const n = 20;
+    for (let i=0; i<=n; i++){ const a = i/n*TAU; pts.push([px+Math.cos(a)*r, py+Math.sin(a)*r]); }
+    addStroke(pts);
+  };
+  const thread = (a,b) => {
+    const mx=(a.px+b.px)/2, my=(a.py+b.py)/2;
+    const dx=b.px-a.px, dy=b.py-a.py, len=Math.hypot(dx,dy)||1;
+    const nx=-dy/len, ny=dx/len, bulge=cellU*0.1;
+    const bx=mx+nx*bulge, by=my+ny*bulge;
+    const pts = [];
+    const n = 10;
+    for (let i=0; i<=n; i++){
+      const t = i/n;
+      pts.push([
+        (1-t)*(1-t)*a.px + 2*(1-t)*t*bx + t*t*b.px,
+        (1-t)*(1-t)*a.py + 2*(1-t)*t*by + t*t*b.py
+      ]);
+    }
+    addStroke(pts);
+  };
+  const petals = Math.round(o.petals);
+  for (let v=v0; v<=v1; v++){
+    for (let u=u0; u<=u1; u++){
+      const a = at(u,v);
+      if (!a) continue;
+      ring(a.px, a.py, a.sz*0.55);
+      for (let i=0; i<petals; i++){
+        const ang = i/petals*TAU;
+        const x1 = a.px+Math.cos(ang)*a.sz*0.55, y1 = a.py+Math.sin(ang)*a.sz*0.55;
+        const x2 = a.px+Math.cos(ang)*a.sz, y2 = a.py+Math.sin(ang)*a.sz;
+        addStroke([[x1,y1],[x2,y2]]);
+      }
+      const r = at(u+1, v); if (r) thread(a, r);
+      const dn = at(u, v+1); if (dn) thread(a, dn);
+    }
+  }
+  state.vector = { kind:'strokes', w, h, items };
 }
 
 /* ---------- ascii ---------- */
@@ -1274,6 +1667,48 @@ function fxAscii(g,w,h,o){
   state.vector = { kind:'glyphs', w, h, items, family, weight: o.bold ? 700 : 400 };
 }
 
+/* ---------- oscilloscope: rows read as traces, plus a graticule ---------- */
+function fxScope(g,w,h,o){
+  beginCanvas(w,h);
+  const items = [];
+  const addStroke = (pts, lw) => {
+    vctx.lineWidth = lw;
+    vctx.beginPath();
+    vctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i=1; i<pts.length; i++) vctx.lineTo(pts[i][0], pts[i][1]);
+    vctx.stroke();
+    items.push({ p:pts, w:lw });
+  };
+  const rows = Math.max(1, Math.round(o.channels));
+  const rowH = h/rows;
+  const amp = clamp(o.amp,0,100)/100 * rowH*0.48;
+
+  if (o.grid){
+    const dashLW = Math.max(0.3, o.weight*0.3);
+    vctx.save();
+    vctx.setLineDash([2,5]);
+    const cols = Math.max(2, Math.round(o.gridCols));
+    for (let c=1; c<cols; c++){ const x=c/cols*w; addStroke([[x,0],[x,h]], dashLW); }
+    for (let r=0; r<rows; r++){ const y=(r+0.5)*rowH; addStroke([[0,y],[w,y]], dashLW); }
+    vctx.restore();
+    vctx.setLineDash([]);
+  }
+
+  const steps = Math.max(24, Math.round(w/Math.max(1,o.res)));
+  for (let r=0; r<rows; r++){
+    const base = (r+0.5)*rowH;
+    const pts = [];
+    for (let i=0; i<=steps; i++){
+      const x = i/steps*w;
+      const lum = bilinear(g,w,h,x, base);
+      const tone = Math.pow(1 - lum/255, o.gamma);
+      pts.push([x, base - (tone-0.5)*2*amp]);
+    }
+    addStroke(pts, o.weight);
+  }
+  state.vector = { kind:'strokes', w, h, items };
+}
+
 /* ---------- relief ---------- */
 function fxRelief(g,w,h,o){
   beginCanvas(w,h);
@@ -1304,10 +1739,10 @@ function fxRelief(g,w,h,o){
 }
 
 const RUNNERS = {
-  threshold:fxThreshold, ordered:fxOrdered, diffuse:fxDiffuse, halftone:fxScreen,
-  spiral:fxSpiral, crosshatch:fxCrosshatch, engrave:fxEngrave, ridge:fxRidge,
-  stitch:fxStitch, ascii:fxAscii, stipple:fxStipple, edge:fxEdge,
-  contour:fxContour, trace:fxTrace, relief:fxRelief, burn:fxBurn
+  threshold:fxThreshold, pixelate:fxPixelate, ordered:fxOrdered, diffuse:fxDiffuse, halftone:fxScreen,
+  spiral:fxSpiral, rings:fxRings, crosshatch:fxCrosshatch, engrave:fxEngrave, ridge:fxRidge,
+  stitch:fxStitch, mosaic:fxMosaic, lace:fxLace, graph:fxGraph, ascii:fxAscii, scope:fxScope,
+  stipple:fxStipple, edge:fxEdge, contour:fxContour, trace:fxTrace, relief:fxRelief, burn:fxBurn
 };
 
 function renderImage(){
@@ -1334,6 +1769,7 @@ function renderImage(){
   const t0 = performance.now();
   const { g } = prepare();
   RUNNERS[state.effect](g, w, h, state.fx);
+  compositeLayers();
   setStatus(EFFECTS[state.effect].label + ' · ' + Math.round(performance.now()-t0) + ' ms');
   measureInk();
   updateReadout();
@@ -1911,6 +2347,18 @@ const CURVES = {
     dials:[T('a','Offset',0,3,0.01,1), T('b','Radius',0.2,3,0.01,1.6), T('k','Symmetry',1,8,1,1,x=>Math.round(x)), TURNS(1,20)],
     f:(t,p)=>{ const r = p.a + p.b*Math.cos(p.k*t); return [r*Math.cos(t), r*Math.sin(t)]; } },
 
+  cybersigil: { label:'Cybersigil', special:'sigil', note:'A random-walk tendril with sharp snapped turns, barb spikes and node dots — the angular circuitboard-glyph linework of cybersigilism. Reseed for a whole new glyph, or use Copies and Mirror below to array one arm into a full symmetric sigil.',
+    dials:[
+      { k:'branches',  l:'Tendrils', t:'range', min:1, max:6, step:1, v:2 },
+      { k:'length',    l:'Segments', t:'range', min:3, max:40, step:1, v:14 },
+      { k:'segLen',    l:'Segment length', t:'range', min:0.04, max:0.4, step:0.005, v:0.14, fmt:v=>v.toFixed(3) },
+      { k:'angleStep', l:'Turn angle', t:'range', min:10, max:90, step:1, v:30, fmt:v=>v+'°' },
+      { k:'straight',  l:'Bias to keep going straight', t:'range', min:0, max:100, step:1, v:35, fmt:v=>v+'%' },
+      { k:'barbs',     l:'Barb chance', t:'range', min:0, max:100, step:1, v:40, fmt:v=>v+'%' },
+      { k:'nodes',     l:'Node chance', t:'range', min:0, max:100, step:1, v:30, fmt:v=>v+'%' },
+      { k:'nodeSize',  l:'Node size', t:'range', min:0.005, max:0.08, step:0.002, v:0.022, fmt:v=>v.toFixed(3) }
+    ] },
+
   custom: { label:'Your own formula', custom:true, note:'Write x(t) and y(t). t runs from zero to two pi times the turns.',
     dials:[T('a','a',-8,8,0.01,3), T('b','b',-8,8,0.01,5), T('c','c',-8,8,0.01,1), T('d','d',-8,8,0.01,0.5), TURNS(8,120)],
     f:(t,p)=>[Math.cos(t), Math.sin(t)] }
@@ -1936,30 +2384,82 @@ function curveDims(){
   return [d,d];
 }
 
+/* ---------- cybersigil: an angular random-walk tendril ---------- */
+// one tendril, in local -1..1 space: spine + barb ticks + node rings,
+// all returned as plain point-array "runs" so it flows through the
+// same copies / mirror / wobble / stroke pipeline as every other curve
+function sigilRun(rng, p){
+  const runs = [];
+  const turnSet = [-2,-1,-1,0,0,0,1,1,2];
+  const baseAngle = (p.angleStep||30) * Math.PI/180;
+  const straight = clamp((p.straight||35)/100, 0, 1);
+  let x=0, y=0, ang = -Math.PI/2;
+  const spine = [[x,y]];
+  const segs = Math.max(3, Math.round(p.length||14));
+  const nodeChance = clamp((p.nodes||30)/100, 0, 1);
+  const barbChance = clamp((p.barbs||40)/100, 0, 1);
+  for (let i=0; i<segs; i++){
+    const turn = rng() < straight ? 0 : turnSet[Math.floor(rng()*turnSet.length)] * baseAngle;
+    ang += turn;
+    const len = (p.segLen||0.14) * (0.65+rng()*0.7) * (1 - i/segs*0.25);
+    x += Math.cos(ang)*len; y += Math.sin(ang)*len;
+    spine.push([x,y]);
+    if (rng() < barbChance){
+      const barbAng = ang + (rng()<0.5 ? 1 : -1) * (Math.PI/2) * (0.7+rng()*0.5);
+      const blen = len * (0.4+rng()*0.5);
+      runs.push([[x,y],[x+Math.cos(barbAng)*blen, y+Math.sin(barbAng)*blen]]);
+    }
+    if (rng() < nodeChance && i < segs-1){
+      const r = (p.nodeSize||0.022) * (0.6+rng()*0.8);
+      const n=10, circ=[];
+      for (let k=0; k<=n; k++){ const a=k/n*TAU; circ.push([x+Math.cos(a)*r, y+Math.sin(a)*r]); }
+      runs.push(circ);
+    }
+  }
+  const r = (p.nodeSize||0.022) * 1.7, n=12, tip=[];
+  for (let k=0; k<=n; k++){ const a=k/n*TAU; tip.push([x+Math.cos(a)*r, y+Math.sin(a)*r]); }
+  runs.push(tip);
+  runs.unshift(spine);
+  return runs;
+}
+function buildCybersigil(p, seed){
+  const rng = mulberry32(seed);
+  const branches = Math.max(1, Math.round(p.branches||2));
+  let runs = [];
+  for (let b=0; b<branches; b++) runs = runs.concat(sigilRun(rng, p));
+  return runs;
+}
+
 function runCurve(){
   stopRun();
   const cv = CURVES[state.curve.key];
   const p = state.curveP;
   const C = state.curve;
   const [W,H] = curveDims();
-  const N = Math.round(C.samples);
-  const tmax = TAU * (p.turns || 1);
-  const f = cv.custom ? (state.customCurve || cv.f) : cv.f;
 
-  // one pass of the raw curve, split wherever the maths goes undefined
-  const runs = [];
-  let run = [];
-  for (let i=0; i<=N; i++){
-    const t = i/N*tmax;
-    let q;
-    try { q = f(t,p); } catch(e){ q = null; }
-    if (!q || !isFinite(q[0]) || !isFinite(q[1]) || Math.abs(q[0]) > 1e6 || Math.abs(q[1]) > 1e6){
-      if (run.length > 1) runs.push(run);
-      run = []; continue;
+  let runs;
+  if (cv.special === 'sigil'){
+    runs = buildCybersigil(p, state.seed);
+  } else {
+    const N = Math.round(C.samples);
+    const tmax = TAU * (p.turns || 1);
+    const f = cv.custom ? (state.customCurve || cv.f) : cv.f;
+
+    // one pass of the raw curve, split wherever the maths goes undefined
+    runs = [];
+    let run = [];
+    for (let i=0; i<=N; i++){
+      const t = i/N*tmax;
+      let q;
+      try { q = f(t,p); } catch(e){ q = null; }
+      if (!q || !isFinite(q[0]) || !isFinite(q[1]) || Math.abs(q[0]) > 1e6 || Math.abs(q[1]) > 1e6){
+        if (run.length > 1) runs.push(run);
+        run = []; continue;
+      }
+      run.push([q[0], q[1]]);
     }
-    run.push([q[0], q[1]]);
+    if (run.length > 1) runs.push(run);
   }
-  if (run.length > 1) runs.push(run);
   if (!runs.length){
     beginCanvas(W,H); state.vector = null;
     setStatus('That curve came out empty'); updateReadout(); return;
@@ -2293,6 +2793,7 @@ function sendToPhoto(){
   img.onload = () => {
     state.srcImage = img;
     state.mask = null;
+    state.layers = []; renderLayers();
     $('#thumb').src = img.src; $('#thumb').hidden = false;
     $('#srcTag').textContent = 'from ' + (state.mode === 'curve' ? 'curve' : state.mode === 'field' ? 'field' : 'system');
     $('#res').value = clamp(Math.round(img.naturalWidth/100)*100, 400, 4000);
@@ -2407,6 +2908,108 @@ function setTool(t){
   $('#paper').classList.toggle('painting', t !== 'off' && state.mode === 'image');
   $('#eraseTag').textContent = t === 'off' ? '' : t === 'erase' ? 'rubbing out' : 'bringing back';
   octx.clearRect(0,0,overlay.width,overlay.height);
+}
+
+/* ============================================================
+   LAYERS
+   "Add current as layer" locks in a snapshot of whatever is on
+   the sheet right now — prepare + effect, exactly as rendered —
+   as a transparent PNG. Every render after that draws the locked
+   layers back on top of the live effect below them, so you can
+   keep tweaking underneath while the earlier passes stay put.
+   ============================================================ */
+function compositeLayers(){
+  if (!state.layers.length) return;
+  state.layers.forEach(L => {
+    if (!L.visible) return;
+    vctx.globalCompositeOperation = L.blend || 'source-over';
+    vctx.globalAlpha = L.opacity != null ? L.opacity : 1;
+    vctx.drawImage(L.img, 0, 0, view.width, view.height);
+  });
+  vctx.globalCompositeOperation = 'source-over';
+  vctx.globalAlpha = 1;
+}
+
+function addLayerFromCurrent(){
+  if (!view.width || state.mode !== 'image') return;
+  const fold = Math.max(1, Math.round(Number($('#layerFold').value) || 1));
+  const c = document.createElement('canvas');
+  c.width = view.width; c.height = view.height;
+  const cx = c.getContext('2d');
+  const cxp = c.width/2, cyp = c.height/2;
+  for (let k=0; k<fold; k++){
+    cx.save();
+    cx.translate(cxp, cyp);
+    cx.rotate(k * TAU/fold);
+    cx.translate(-cxp, -cyp);
+    cx.drawImage(view, 0, 0);
+    cx.restore();
+  }
+  const img = new Image();
+  img.onload = () => {
+    state.layers.push({
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,6),
+      name: EFFECTS[state.effect].label + (fold > 1 ? ' ×'+fold : ''),
+      img, blend:'source-over', opacity:1, visible:true
+    });
+    renderLayers();
+    render();
+    setStatus('Layer added' + (fold > 1 ? ' · duplicated ' + fold + '×' : '') + ' · <b>' + state.layers.length + '</b> total');
+  };
+  img.src = c.toDataURL('image/png');
+}
+
+function clearLayers(){
+  state.layers = [];
+  renderLayers();
+  render();
+}
+
+const LAYER_BLENDS = [['source-over','Normal'],['multiply','Multiply'],['screen','Lighten']];
+
+function renderLayers(){
+  const host = $('#layerList');
+  $('#layerTag').textContent = state.layers.length ? state.layers.length + ' locked' : '';
+  host.innerHTML = '';
+  if (!state.layers.length){
+    host.innerHTML = '<p class="hint">No layers locked in yet.</p>';
+    return;
+  }
+  state.layers.forEach((L, i) => {
+    const row = document.createElement('div');
+    row.className = 'layer-row';
+
+    const top = document.createElement('div');
+    top.className = 'layer-top';
+    const vis = document.createElement('input');
+    vis.type = 'checkbox'; vis.checked = L.visible;
+    vis.addEventListener('change', () => { L.visible = vis.checked; render(); });
+    const name = document.createElement('b');
+    name.textContent = (i+1) + '. ' + L.name;
+    const up = document.createElement('button');
+    up.type='button'; up.className='layer-btn'; up.textContent='↑'; up.title='Move up'; up.disabled = i===0;
+    up.addEventListener('click', () => { [state.layers[i-1], state.layers[i]] = [state.layers[i], state.layers[i-1]]; renderLayers(); render(); });
+    const down = document.createElement('button');
+    down.type='button'; down.className='layer-btn'; down.textContent='↓'; down.title='Move down'; down.disabled = i===state.layers.length-1;
+    down.addEventListener('click', () => { [state.layers[i+1], state.layers[i]] = [state.layers[i], state.layers[i+1]]; renderLayers(); render(); });
+    const del = document.createElement('button');
+    del.type='button'; del.className='layer-btn layer-del'; del.textContent='×'; del.title='Delete layer';
+    del.addEventListener('click', () => { state.layers.splice(i,1); renderLayers(); render(); });
+    top.append(vis, name, up, down, del);
+
+    const bottom = document.createElement('div');
+    bottom.className = 'layer-bottom';
+    const sel = document.createElement('select');
+    LAYER_BLENDS.forEach(([v,l]) => { const o=document.createElement('option'); o.value=v; o.textContent=l; if (v===L.blend) o.selected=true; sel.appendChild(o); });
+    sel.addEventListener('change', () => { L.blend = sel.value; render(); });
+    const op = document.createElement('input');
+    op.type='range'; op.min=0; op.max=1; op.step=0.02; op.value=L.opacity;
+    op.addEventListener('input', () => { L.opacity = Number(op.value); render(); });
+    bottom.append(sel, op);
+
+    row.append(top, bottom);
+    host.appendChild(row);
+  });
 }
 
 /* ============================================================
@@ -2542,6 +3145,138 @@ function layoutSheet(){
     measureInk();
     updateReadout();
   }).catch(() => setStatus('One of the pins would not open'));
+}
+
+/* ============================================================
+   PRESETS
+   Full snapshots of the current pipeline — prepare and effect
+   thresholds in Photo mode, or the system/curve/field dials —
+   kept in localStorage and exportable as a JSON file.
+   ============================================================ */
+const PRESET_KEY = 'flashMachinePresets';
+
+function loadPresets(){
+  try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '[]'); }
+  catch(e){ return []; }
+}
+function savePresetsList(list){
+  localStorage.setItem(PRESET_KEY, JSON.stringify(list));
+}
+function escapeHtml(t){
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function capturePreset(){
+  const mode = state.mode;
+  if (mode === 'image') return { mode, data: { pre:{...state.pre}, effect:state.effect, fx:{...state.fx} } };
+  if (mode === 'generate') return { mode, data: { system:state.gen.system, gen:{...state.gen}, genP:{...state.genP} } };
+  if (mode === 'curve') return { mode, data: { key:state.curve.key, curve:{...state.curve}, curveP:{...state.curveP} } };
+  return { mode, data: { key:state.field.key, field:{...state.field}, fieldP:{...state.fieldP} } };
+}
+
+function presetSubtitle(p){
+  const d = p.data;
+  if (p.mode === 'image') return (EFFECTS[d.effect] ? EFFECTS[d.effect].label : d.effect);
+  if (p.mode === 'generate') return (SYSTEMS[d.system] ? SYSTEMS[d.system].label : d.system);
+  if (p.mode === 'curve') return (CURVES[d.key] ? CURVES[d.key].label : d.key);
+  return (FIELDS[d.key] ? FIELDS[d.key].label : d.key);
+}
+
+function savePreset(){
+  const nameInput = $('#presetName');
+  const name = nameInput.value.trim();
+  if (!name){ setStatus('Name the preset first'); return; }
+  const list = loadPresets();
+  const snap = capturePreset();
+  list.push({ id: Date.now()+'-'+Math.random().toString(36).slice(2,7), name, mode: snap.mode, data: snap.data });
+  savePresetsList(list);
+  nameInput.value = '';
+  renderPresets();
+  setStatus('Saved preset <b>' + escapeHtml(name) + '</b>');
+}
+
+function deletePreset(id){
+  savePresetsList(loadPresets().filter(p => p.id !== id));
+  renderPresets();
+}
+
+function applyPreset(p){
+  const mode = p.mode, data = p.data;
+  if (mode === 'image'){
+    setMode('image');
+    Object.assign(state.pre, data.pre);
+    buildControls($('#preControls'), PRE_SCHEMA, state.pre, scheduleRender);
+    state.fxAll[data.effect] = Object.assign({}, data.fx);
+    selectEffect(data.effect);
+  } else if (mode === 'generate'){
+    setMode('generate');
+    state.genAll[data.system] = Object.assign({}, data.genP);
+    Object.assign(state.gen, data.gen);
+    buildRenderControls();
+    state.keepRender = true;
+    selectSystem(data.system);
+    state.keepRender = false;
+  } else if (mode === 'curve'){
+    setMode('curve');
+    state.curveAll[data.key] = Object.assign({}, data.curveP);
+    Object.assign(state.curve, data.curve);
+    selectCurve(data.key);
+  } else {
+    setMode('field');
+    state.fieldAll[data.key] = Object.assign({}, data.fieldP);
+    Object.assign(state.field, data.field);
+    selectField(data.key);
+  }
+  setStatus('Loaded preset <b>' + escapeHtml(p.name) + '</b>');
+}
+
+function renderPresets(){
+  const list = loadPresets();
+  $('#presetTag').textContent = list.length ? list.length + ' saved' : '';
+  const host = $('#presetList');
+  host.innerHTML = '';
+  if (!list.length){
+    host.innerHTML = '<p class="hint">No presets saved yet.</p>';
+    return;
+  }
+  list.slice().reverse().forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'preset-row';
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'preset-apply'; btn.title = 'Load this preset';
+    btn.innerHTML = '<b>' + escapeHtml(p.name) + '</b><span>' + p.mode + ' · ' + escapeHtml(presetSubtitle(p)) + '</span>';
+    btn.addEventListener('click', () => applyPreset(p));
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'preset-del'; del.textContent = '×'; del.title = 'Delete preset';
+    del.addEventListener('click', e => { e.stopPropagation(); deletePreset(p.id); });
+    row.appendChild(btn); row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
+function exportPresets(){
+  const list = loadPresets();
+  if (!list.length){ setStatus('Nothing saved to export'); return; }
+  const blob = new Blob([JSON.stringify(list, null, 2)], { type:'application/json' });
+  download(URL.createObjectURL(blob), 'flash-machine-presets.json');
+  setStatus('Exported <b>' + list.length + '</b> presets');
+}
+
+function importPresetsFile(file){
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const incoming = JSON.parse(reader.result);
+      if (!Array.isArray(incoming)) throw new Error('bad format');
+      savePresetsList(loadPresets().concat(incoming));
+      renderPresets();
+      setStatus('Imported <b>' + incoming.length + '</b> presets');
+    } catch(e){
+      setStatus('That file did not look like a presets export');
+    }
+  };
+  reader.readAsText(file);
 }
 
 /* ============================================================
@@ -2705,6 +3440,7 @@ function loadFile(file){
   img.onload = () => {
     state.srcImage = img;
     state.mask = null;
+    state.layers = []; renderLayers();
     $('#thumb').src = url; $('#thumb').hidden = false;
     $('#srcTag').textContent = img.naturalWidth + '×' + img.naturalHeight;
     setMode('image');
@@ -2747,6 +3483,9 @@ function boot(){
   buildControls($('#fieldControls'), FIELD_SCHEMA, state.field, scheduleRender);
   buildControls($('#pinControls'), SHEET_SCHEMA, state.sheet, () => {});
   bindEraser();
+  renderLayers();
+  $('#layerAdd').addEventListener('click', addLayerFromCurrent);
+  $('#layerClear').addEventListener('click', clearLayers);
 
   $('#drop').addEventListener('click', () => $('#file').click());
   $('#drop').addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' '){ e.preventDefault(); $('#file').click(); } });
@@ -2813,6 +3552,13 @@ function boot(){
   $('#png2Btn').addEventListener('click', () => exportPNG(2));
   $('#svgBtn').addEventListener('click', exportSVG);
   $('#sendBtn').addEventListener('click', sendToPhoto);
+
+  renderPresets();
+  $('#presetSave').addEventListener('click', savePreset);
+  $('#presetName').addEventListener('keydown', e => { if (e.key === 'Enter') savePreset(); });
+  $('#presetExport').addEventListener('click', exportPresets);
+  $('#presetImportBtn').addEventListener('click', () => $('#presetImportFile').click());
+  $('#presetImportFile').addEventListener('change', e => importPresetsFile(e.target.files[0]));
 
   document.addEventListener('keydown', e => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
