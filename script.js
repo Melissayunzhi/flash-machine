@@ -19,8 +19,10 @@ const overlay = $('#overlay');
 const octx    = overlay.getContext('2d');
 
 const state = {
-  mode:'generate',
+  mode:'image',
   effect:'diffuse',
+  activeEffects:['diffuse'],
+  combine:false,
   srcImage:null,
   work:document.createElement('canvas'),
   mask:null,
@@ -29,6 +31,9 @@ const state = {
   pre:{ invert:false, bright:0, contrast:0, gamma:1, blur:0, noise:0 },
   fx:{}, fxAll:{},
   gen:{ system:'dejong', points:900000, exposure:1, gamma:0.55, format:'square', detail:1000, draw:'dots' },
+  rot3d:{ x:0.35, y:0.6 },
+  growth:{ playing:false, loop:false, duration:4 },
+  spin:{ auto:false },
   genP:{}, genAll:{},
   curve:{ key:'spiro', copies:1, spin:0, weight:1.6, samples:12000, wobble:0, mirror:false, detail:1100, format:'square' },
   curveP:{}, curveAll:{},
@@ -106,13 +111,47 @@ function buildControls(host, schema, store, onChange){
 const PRE_SCHEMA = [
   { k:'sym',      l:'Symmetry', t:'select', v:'none', opts:[['none','Off'],['lr','Mirror left to right'],['rl','Mirror right to left'],['tb','Mirror top to bottom'],['quad','Four ways'],['kal','Kaleidoscope']] },
   { k:'symN',     l:'Kaleidoscope wedges', t:'range', min:3, max:24, step:1, v:8 },
+  { k:'warp',     l:'Warp', t:'select', v:'none', opts:[['none','Off'],['ripple','Ripple'],['swirl','Swirl'],['pinch','Pinch']] },
+  { k:'warpAmt',  l:'Warp amount', t:'range', min:0, max:100, step:1, v:40, fmt:v=>v+'%' },
   { k:'bright',   l:'Brightness', t:'range', min:-100, max:100, step:1, v:0 },
   { k:'contrast', l:'Contrast',   t:'range', min:-100, max:200, step:1, v:0 },
   { k:'gamma',    l:'Midtones',   t:'range', min:0.2,  max:3,   step:0.05, v:1, fmt:v=>v.toFixed(2) },
   { k:'blur',     l:'Softness',   t:'range', min:0,    max:30,  step:1, v:0, fmt:v=>v+' px' },
   { k:'noise',    l:'Grain',      t:'range', min:0,    max:100, step:1, v:0 },
+  { k:'vig',      l:'Vignette',   t:'range', min:0,    max:100, step:1, v:0, fmt:v=>v+'%' },
+  { k:'vigSoft',  l:'Vignette softness', t:'range', min:5, max:100, step:1, v:55, fmt:v=>v+'%' },
   { k:'invert',   l:'Invert',     t:'check', v:false }
 ];
+
+/* ---------- warp: ripple, swirl, pinch — resamples the grayscale before anything else runs ---------- */
+function applyWarp(g,w,h,type,amt){
+  if (type === 'none' || amt <= 0) return g;
+  const out = new Float32Array(g.length);
+  const cx=w/2, cy=h/2, maxR=Math.min(w,h)/2, k=amt/100;
+  for (let y=0; y<h; y++){
+    for (let x=0; x<w; x++){
+      const dx=x-cx, dy=y-cy, r=Math.hypot(dx,dy), a=Math.atan2(dy,dx);
+      let sx=x, sy=y;
+      if (type === 'ripple'){
+        const phase = Math.sin(r/maxR*10) * k*20;
+        sx = x + Math.cos(a+Math.PI/2)*phase;
+        sy = y + Math.sin(a+Math.PI/2)*phase;
+      } else if (type === 'swirl'){
+        const t = clamp(1 - r/maxR, 0, 1);
+        const ang = a + t*t*k*4;
+        sx = cx + Math.cos(ang)*r;
+        sy = cy + Math.sin(ang)*r;
+      } else if (type === 'pinch'){
+        const t = clamp(r/maxR, 0, 1);
+        const nr = Math.pow(t, 1+k*2) * maxR;
+        sx = cx + Math.cos(a)*nr;
+        sy = cy + Math.sin(a)*nr;
+      }
+      out[y*w+x] = bilinear(g, w, h, clamp(sx,0,w-1), clamp(sy,0,h-1));
+    }
+  }
+  return out;
+}
 
 function grayFromWork(){
   const w = state.work.width, h = state.work.height;
@@ -162,12 +201,25 @@ function prepare(){
     if (p.invert) v = 255 - v;
     g[i] = v;
   }
-  if (p.blur > 0) boxBlur(g, w, h, p.blur);
+  let g2 = (p.warp && p.warp !== 'none' && p.warpAmt > 0) ? applyWarp(g, w, h, p.warp, p.warpAmt) : g;
+  if (p.blur > 0) boxBlur(g2, w, h, p.blur);
   if (p.noise > 0){
     const n = p.noise * 1.2;
-    for (let i=0; i<g.length; i++) g[i] = clamp(g[i] + (Math.random()-0.5)*n, 0, 255);
+    for (let i=0; i<g2.length; i++) g2[i] = clamp(g2[i] + (Math.random()-0.5)*n, 0, 255);
   }
-  return { g, w, h };
+  if (p.vig > 0){
+    const cx=w/2, cy=h/2, maxR=Math.hypot(cx,cy);
+    const soft = Math.max(p.vigSoft,1)/100;
+    for (let y=0; y<h; y++){
+      for (let x=0; x<w; x++){
+        const r = Math.hypot(x-cx,y-cy)/maxR;
+        const t = clamp((r-(1-soft))/soft, 0, 1);
+        const i = y*w+x;
+        g2[i] = clamp(g2[i] - t*(p.vig/100)*255, 0, 255);
+      }
+    }
+  }
+  return { g:g2, w, h };
 }
 
 /* ---------- symmetry, folded into the photo before anything else ---------- */
@@ -330,7 +382,7 @@ const EFFECTS = {
     { k:'block',  l:'Pixel size', t:'range', min:1, max:48, step:1, v:1, fmt:v=>v+' px' },
     { k:'serp',   l:'Serpentine scan', t:'check', v:true }
   ]},
-  halftone: { label:'Screen', note:'A grid of marks sized by the tone underneath. Bars join up into continuous lines, which is the default, and the grid angle turns the whole field. Benday staggers the rows. Everything here exports as vector.', controls:[
+  halftone: { label:'Halftone Screen', note:'A grid of marks sized by the tone underneath. Bars join up into continuous lines, which is the default, and the grid angle turns the whole field. Benday staggers the rows. Everything here exports as vector.', controls:[
     { k:'count', l:'Cells down the sheet', t:'range', min:8, max:400, step:1, v:90 },
     { k:'grid',  l:'Grid', t:'select', v:'regular', opts:[['regular','Regular'],['benday','Benday, staggered'],['hex','Hexagonal']] },
     { k:'shape', l:'Mark', t:'select', v:'bar', opts:[['bar','Bar, joins into lines'],['dot','Round dot'],['square','Square'],['diamond','Diamond'],['cross','Cross'],['ring','Ring'],['line','Continuous line'],['star','Star'],['sparkle','Sparkle'],['heart','Heart'],['cloud','Cloud']] },
@@ -339,6 +391,15 @@ const EFFECTS = {
     { k:'min',   l:'Smallest mark', t:'range', min:0, max:100, step:1, v:7, fmt:v=>v+'%' },
     { k:'cut',   l:'Skip cells lighter than', t:'range', min:0, max:255, step:1, v:255 },
     { k:'gamma', l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
+  ]},
+  dotmatrix: { label:'Dot Matrix', note:'A regular grid of fixed-size dots, switched on and off by a dither pattern — an LED sign or a dot-matrix printer reading the photo, not a halftone that grows and shrinks.', controls:[
+    { k:'count',  l:'Cells down the sheet', t:'range', min:8, max:200, step:1, v:60 },
+    { k:'shape',  l:'Dot', t:'select', v:'circle', opts:[['circle','Round'],['square','Square']] },
+    { k:'size',   l:'Dot size', t:'range', min:10, max:100, step:1, v:65, fmt:v=>v+'%' },
+    { k:'pattern',l:'Dither', t:'select', v:'bayer', opts:[['bayer','Bayer'],['cluster','Clustered'],['lines','Lines'],['random','Random']] },
+    { k:'matrixSize', l:'Dither tile', t:'range', min:2, max:16, step:1, v:8, fmt:v=>v+' × '+v },
+    { k:'cut',    l:'Skip lighter than', t:'range', min:0, max:255, step:1, v:255 },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
   ]},
   crosshatch: { label:'Crosshatch', note:'Layers of straight hatching, each one switching on further into the shadows.', controls:[
     { k:'spacing', l:'Line spacing', t:'range', min:3, max:60, step:1, v:9, fmt:v=>v+' px' },
@@ -425,6 +486,21 @@ const EFFECTS = {
     { k:'nodeSize', l:'Node size', t:'range', min:0.5, max:8, step:0.1, v:2, fmt:v=>v.toFixed(1)+' px' },
     { k:'weight', l:'Line weight', t:'range', min:0.2, max:4, step:0.1, v:0.8, fmt:v=>v.toFixed(1)+' px' }
   ]},
+  scanlines: { label:'Scanlines', note:'Solid horizontal rows, thickening where the photo is dark, with the odd row dropped out — a CRT screen reading the picture.', controls:[
+    { k:'spacing', l:'Row spacing', t:'range', min:2, max:30, step:0.5, v:6, fmt:v=>v.toFixed(1)+' px' },
+    { k:'wmin',    l:'Thinnest', t:'range', min:0, max:4, step:0.05, v:0.2, fmt:v=>v.toFixed(2)+' px' },
+    { k:'wmax',    l:'Thickest', t:'range', min:0.5, max:20, step:0.5, v:5, fmt:v=>v.toFixed(1)+' px' },
+    { k:'res',     l:'Detail', t:'range', min:1, max:10, step:1, v:2, fmt:v=>v+' px' },
+    { k:'dropout', l:'Row dropout', t:'range', min:0, max:60, step:1, v:8, fmt:v=>v+'%' },
+    { k:'cut',     l:'Skip lighter than', t:'range', min:0, max:255, step:1, v:255 },
+    { k:'gamma',   l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
+  ]},
+  glitch: { label:'Glitch', note:'Horizontal bands sheared sideways at random, the way a bad signal tears a picture apart. Raise the chance for a rougher break-up.', controls:[
+    { k:'band',   l:'Band height', t:'range', min:2, max:80, step:1, v:14, fmt:v=>v+' px' },
+    { k:'shift',  l:'Max shift', t:'range', min:2, max:200, step:1, v:50, fmt:v=>v+' px' },
+    { k:'chance', l:'Chance a band glitches', t:'range', min:0, max:100, step:1, v:45, fmt:v=>v+'%' },
+    { k:'gamma',  l:'Tone curve', t:'range', min:0.3, max:3, step:0.05, v:1, fmt:v=>v.toFixed(2) }
+  ]},
   ascii: { label:'ASCII', note:'Every cell becomes the character closest to its tone. Write your own ramp if you want it in your own alphabet. Exports as real text you can still edit.', controls:[
     { k:'cols',  l:'Columns', t:'range', min:10, max:300, step:1, v:80 },
     { k:'ramp',  l:'Characters', t:'select', v:'classic', opts:[['classic','. : - = + * # % @'],['soft',', ; o x % #'],['blocks','Block shading'],['round','. o O 0 @'],['binary','Full block only'],['code','Code punctuation'],['bars','Bars and slashes'],['stars','Sparse dots and stars'],['custom','Write my own']] },
@@ -477,7 +553,7 @@ const EFFECTS = {
     { k:'weight', l:'Line weight', t:'range', min:0.3, max:8, step:0.1, v:1.6, fmt:v=>v.toFixed(1)+' px' },
     { k:'minlen', l:'Drop paths shorter than', t:'range', min:0, max:200, step:5, v:20, fmt:v=>v+' px' }
   ]},
-  relief: { label:'Relief', note:'Reads the photo as a raised surface and lights it from one side. Plaster, stamped leather, pressed paper.', controls:[
+  relief: { label:'Relief / Emboss', note:'Reads the photo as a raised surface and lights it from one side. Plaster, stamped leather, pressed paper, embossed card.', controls:[
     { k:'depth', l:'Depth', t:'range', min:0.2, max:20, step:0.2, v:4, fmt:v=>v.toFixed(1) },
     { k:'light', l:'Light direction', t:'range', min:0, max:360, step:1, v:315, fmt:v=>v+'°' },
     { k:'elev',  l:'Light height', t:'range', min:5, max:85, step:1, v:40, fmt:v=>v+'°' },
@@ -493,6 +569,22 @@ const EFFECTS = {
     { k:'dot',    l:'Particle size', t:'range', min:0.3, max:8, step:0.1, v:0.8, fmt:v=>v.toFixed(1)+' px' }
   ]}
 };
+
+// display order for the Treatment grid — grouped by family so the two
+// columns read as related pairs, rather than the dict's insertion order
+const EFFECT_ORDER = (() => {
+  const named = [
+    'threshold', 'ordered', 'diffuse', 'pixelate',
+    'halftone', 'dotmatrix', 'rings', 'spiral', 'mosaic',
+    'crosshatch', 'engrave', 'ridge', 'scope', 'scanlines', 'glitch',
+    'stitch', 'lace', 'graph',
+    'stipple', 'burn',
+    'edge', 'contour', 'trace', 'relief',
+    'ascii'
+  ].filter(k => EFFECTS[k]);
+  const seen = new Set(named);
+  return named.concat(Object.keys(EFFECTS).filter(k => !seen.has(k)));
+})();
 
 const MATRIX_CACHE = {};
 function bayerMatrix(n){
@@ -796,6 +888,40 @@ function fxScreen(g,w,h,o){
       } else if (STAMP_SHAPES[o.shape]){
         fillStamp(o.shape, px, py, sz);
         items.push({ p: stampAbsPoints(o.shape, px, py, sz) });
+      }
+    }
+  }
+  state.vector = { kind:'marks', w, h, items };
+}
+
+/* ---------- dot matrix: fixed-size dots, switched by a dither pattern ---------- */
+function fxDotMatrix(g,w,h,o){
+  beginCanvas(w,h);
+  const items = [];
+  const cell = Math.max(3, h/Math.round(o.count));
+  const cols = Math.ceil(w/cell)+1, rows = Math.ceil(h/cell)+1;
+  const m = o.pattern === 'random' ? null : getMatrix(o.pattern, Math.max(2, Math.round(o.matrixSize)));
+  const n = m ? m.length : 1, area = n*n;
+  const r = cell*0.5*(o.size/100);
+  vctx.fillStyle = '#000';
+  for (let gy=0; gy<rows; gy++){
+    for (let gx=0; gx<cols; gx++){
+      const px = gx*cell + cell/2, py = gy*cell + cell/2;
+      if (px >= w || py >= h) continue;
+      const lum = sample(g,w,h,px,py);
+      if (lum > o.cut) continue;
+      const tone = Math.pow(1 - lum/255, o.gamma);
+      const on = o.pattern === 'random'
+        ? Math.random() < tone
+        : tone > (m[gy%n][gx%n] + 0.5)/area;
+      if (!on || r < 0.15) continue;
+      if (o.shape === 'square'){
+        vctx.fillRect(px-r, py-r, r*2, r*2);
+        items.push({ p:[[px-r,py-r],[px+r,py-r],[px+r,py+r],[px-r,py+r]] });
+      } else {
+        if (r < 0.6) vctx.fillRect(px-r, py-r, r*2, r*2);
+        else { vctx.beginPath(); vctx.arc(px,py,r,0,TAU); vctx.fill(); }
+        items.push({ t:'circle', x:px, y:py, r });
       }
     }
   }
@@ -1251,6 +1377,72 @@ function fxGraph(g,w,h,o){
   });
 
   state.vector = { kind:'marks', w, h, items };
+}
+
+/* ---------- scanlines: solid rows, thickness set by tone ---------- */
+function fxScanlines(g,w,h,o){
+  beginCanvas(w,h);
+  const items = [];
+  const step = o.spacing;
+  vctx.lineCap = 'butt';
+  for (let y=step/2; y<h; y+=step){
+    if (Math.random()*100 < o.dropout) continue;
+    let run = [], runW = -1;
+    const flush = () => {
+      if (run.length > 1 && runW > 0.04){
+        vctx.lineWidth = runW;
+        vctx.beginPath();
+        vctx.moveTo(run[0][0], run[0][1]);
+        for (let i=1; i<run.length; i++) vctx.lineTo(run[i][0], run[i][1]);
+        vctx.stroke();
+        items.push({ p:run, w:runW });
+      }
+      run = [];
+    };
+    const yi = Math.min(h-1, Math.round(y));
+    for (let x=0; x<w; x+=Math.max(1,o.res)){
+      const lum = sample(g,w,h,x,yi);
+      if (lum > o.cut){ flush(); runW=-1; continue; }
+      const tone = Math.pow(1 - lum/255, o.gamma);
+      const lw = clamp(o.wmin + tone*(o.wmax-o.wmin), 0, step);
+      if (Math.abs(lw-runW) > 1e-6){
+        const tail = run.length ? run[run.length-1] : null;
+        flush();
+        runW = lw;
+        if (tail) run.push(tail);
+      }
+      run.push([x,y]);
+    }
+    flush();
+  }
+  state.vector = { kind:'strokes', w, h, items };
+}
+
+/* ---------- glitch: bands sheared sideways ---------- */
+function fxGlitch(g,w,h,o){
+  beginCanvas(w,h);
+  const img = inkImage(w,h), d = img.data;
+  const bandH = Math.max(2, Math.round(o.band));
+  const rng = mulberry32((state.seed ^ 0x9E3779B9) >>> 0);
+  let y = 0;
+  while (y < h){
+    const bh = Math.min(h-y, bandH + Math.floor(rng()*bandH));
+    const glitchy = rng()*100 < o.chance;
+    const shift = glitchy ? Math.round((rng()-0.5)*2*o.shift) : 0;
+    for (let yy=y; yy<y+bh; yy++){
+      for (let x=0; x<w; x++){
+        let sx = ((x - shift) % w + w) % w;
+        const lum = g[yy*w + sx];
+        let a = clamp(Math.pow(1 - lum/255, o.gamma), 0, 1);
+        if (glitchy && rng() < 0.06) a = rng() < 0.5 ? 0 : 1;
+        const alpha = Math.round(a*255);
+        if (alpha > 2) put(d, yy*w+x, alpha);
+      }
+    }
+    y += bh;
+  }
+  vctx.putImageData(img,0,0);
+  state.vector = null;
 }
 
 /* ---------- outline treatments ---------- */
@@ -1740,9 +1932,10 @@ function fxRelief(g,w,h,o){
 
 const RUNNERS = {
   threshold:fxThreshold, pixelate:fxPixelate, ordered:fxOrdered, diffuse:fxDiffuse, halftone:fxScreen,
-  spiral:fxSpiral, rings:fxRings, crosshatch:fxCrosshatch, engrave:fxEngrave, ridge:fxRidge,
-  stitch:fxStitch, mosaic:fxMosaic, lace:fxLace, graph:fxGraph, ascii:fxAscii, scope:fxScope,
-  stipple:fxStipple, edge:fxEdge, contour:fxContour, trace:fxTrace, relief:fxRelief, burn:fxBurn
+  dotmatrix:fxDotMatrix, spiral:fxSpiral, rings:fxRings, crosshatch:fxCrosshatch, engrave:fxEngrave, ridge:fxRidge,
+  stitch:fxStitch, mosaic:fxMosaic, lace:fxLace, graph:fxGraph, scanlines:fxScanlines, glitch:fxGlitch,
+  ascii:fxAscii, scope:fxScope, stipple:fxStipple, edge:fxEdge, contour:fxContour, trace:fxTrace,
+  relief:fxRelief, burn:fxBurn
 };
 
 function renderImage(){
@@ -1768,9 +1961,29 @@ function renderImage(){
   if (state.pre.sym && state.pre.sym !== 'none') applySymmetry(state.work, state.pre.sym, state.pre.symN);
   const t0 = performance.now();
   const { g } = prepare();
-  RUNNERS[state.effect](g, w, h, state.fx);
+  let label;
+  if (state.activeEffects.length <= 1){
+    const key = state.activeEffects[0] || state.effect;
+    RUNNERS[key](g, w, h, state.fxAll[key]);
+    label = EFFECTS[key].label;
+  } else {
+    const snaps = [];
+    let lastVector = null;
+    state.activeEffects.forEach(key => {
+      RUNNERS[key](g, w, h, state.fxAll[key] || (state.fxAll[key] = {}));
+      lastVector = state.vector;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(view, 0, 0);
+      snaps.push(c);
+    });
+    beginCanvas(w,h);
+    snaps.forEach(c => vctx.drawImage(c,0,0));
+    state.vector = lastVector;
+    label = state.activeEffects.map(k => EFFECTS[k].label).join(' + ');
+  }
   compositeLayers();
-  setStatus(EFFECTS[state.effect].label + ' · ' + Math.round(performance.now()-t0) + ' ms');
+  setStatus(label + ' · ' + Math.round(performance.now()-t0) + ' ms');
   measureInk();
   updateReadout();
 }
@@ -1836,23 +2049,20 @@ const SYSTEMS = {
   lorenz: { label:'Lorenz system', kind:'ode', suggest:{draw:'lines',points:160000,exposure:0.5,gamma:0.55}, start:[0.1,0,20], dim:3,
     note:'The butterfly. Try the line draw mode for a single continuous stroke.',
     dials:[D('s','sigma',1,20,0.01,10), D('r','rho',10,60,0.01,28), D('b','beta',0.5,5,0.001,2.667),
-           { k:'dt', l:'Step', t:'range', min:0.001, max:0.02, step:0.001, v:0.006, fmt:v=>v.toFixed(3) },
-           { k:'plane', l:'View', t:'select', v:'xz', opts:[['xy','x / y'],['xz','x / z'],['yz','y / z']] }],
+           { k:'dt', l:'Step', t:'range', min:0.001, max:0.02, step:0.001, v:0.006, fmt:v=>v.toFixed(3) }],
     f:(x,y,z,p)=>[p.s*(y-x), x*(p.r-z)-y, x*y - p.b*z] },
 
   rossler: { label:'Rössler system', kind:'ode', suggest:{draw:'lines',points:160000,exposure:0.5,gamma:0.55}, start:[1,1,1], dim:3,
     note:'One spiralling band that jumps out and folds back.',
     dials:[D('a','a',0.05,0.5,0.001,0.2), D('b','b',0.05,2,0.001,0.2), D('c','c',2,18,0.01,5.7),
-           { k:'dt', l:'Step', t:'range', min:0.002, max:0.05, step:0.001, v:0.02, fmt:v=>v.toFixed(3) },
-           { k:'plane', l:'View', t:'select', v:'xy', opts:[['xy','x / y'],['xz','x / z'],['yz','y / z']] }],
+           { k:'dt', l:'Step', t:'range', min:0.002, max:0.05, step:0.001, v:0.02, fmt:v=>v.toFixed(3) }],
     f:(x,y,z,p)=>[-y-z, x + p.a*y, p.b + z*(x - p.c)] },
 
   aizawa: { label:'Aizawa system', kind:'ode', suggest:{draw:'lines',points:200000,exposure:0.5,gamma:0.55}, start:[0.1,0,0], dim:3,
     note:'A wound sphere with a spike through it. Dense and ornamental.',
     dials:[D('a','a',0.5,1.2,0.001,0.95), D('b','b',0.4,0.8,0.001,0.7), D('c','c',0.1,1,0.001,0.6),
            D('d','d',3,4,0.001,3.5), D('e','e',0.1,0.5,0.001,0.25), D('f','f',0.05,0.5,0.001,0.1),
-           { k:'dt', l:'Step', t:'range', min:0.002, max:0.05, step:0.001, v:0.01, fmt:v=>v.toFixed(3) },
-           { k:'plane', l:'View', t:'select', v:'xz', opts:[['xy','x / y'],['xz','x / z'],['yz','y / z']] }],
+           { k:'dt', l:'Step', t:'range', min:0.002, max:0.05, step:0.001, v:0.01, fmt:v=>v.toFixed(3) }],
     f:(x,y,z,p)=>[(z-p.b)*x - p.d*y, p.d*x + (z-p.b)*y, p.c + p.a*z - z*z*z/3 - (x*x+y*y)*(1+p.e*z) + p.f*z*x*x*x] },
 
   harmonograph: { label:'Harmonograph', kind:'param', suggest:{draw:'lines',points:240000,exposure:0.7,gamma:0.55},
@@ -1903,10 +2113,13 @@ function vnoise(x,y){
 }
 
 /* ---------- iterators ---------- */
-function project(x,y,z,plane){
-  if (plane === 'xy') return [x,y];
-  if (plane === 'yz') return [y,z];
-  return [x,z];
+function project3D(x,y,z,rot){
+  const cy=Math.cos(rot.y), sy=Math.sin(rot.y);
+  const x1 = x*cy - z*sy;
+  const z1 = x*sy + z*cy;
+  const cx=Math.cos(rot.x), sx=Math.sin(rot.x);
+  const y1 = y*cx - z1*sx;
+  return [x1, y1];
 }
 
 function makeIter(sys, p, rng){
@@ -1936,7 +2149,7 @@ function makeIter(sys, p, rng){
       y += dt/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);
       z += dt/6*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
       if (!isFinite(x)||!isFinite(y)||!isFinite(z)){ x=sys.start[0]; y=sys.start[1]; z=sys.start[2]; }
-      const pr = project(x,y,z,p.plane||'xz');
+      const pr = project3D(x,y,z,state.rot3d);
       return [pr[0], pr[1], false];
     }};
   }
@@ -2040,7 +2253,9 @@ function runGenerator(){
   for (let i=0; i<warm; i++) it.step();
 
   let done = 0, lastX = null, lastY = null, ink = 0, poly = [], polys = [];
-  const chunk = 120000;
+  const chunk = state.growth.playing
+    ? Math.max(300, Math.ceil(total / (state.growth.duration*60)))
+    : 120000;
   const t0 = performance.now();
 
   function frame(){
@@ -2078,6 +2293,15 @@ function runGenerator(){
       setStatus(sys.label + ' · ' + Math.round(performance.now()-t0) + ' ms');
       measureInk();
       updateReadout();
+      if (state.spin.auto && is3DSystem()){
+        state.rot3d.y += 0.05;
+        requestAnimationFrame(() => runGenerator());
+        return;
+      }
+      if (state.growth.playing){
+        if (state.growth.loop) requestAnimationFrame(() => runGenerator());
+        else { state.growth.playing = false; updatePlayButton(); }
+      }
     }
   }
   frame();
@@ -2710,6 +2934,19 @@ function flatten(scale){
   return c;
 }
 
+function makeThumb(size){
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0,0,size,size);
+  if (view.width && view.height){
+    const k = Math.min(size/view.width, size/view.height);
+    const dw = view.width*k, dh = view.height*k;
+    x.drawImage(view, (size-dw)/2, (size-dh)/2, dw, dh);
+  }
+  return c.toDataURL('image/png');
+}
+
 function stamp(){
   const d = new Date(), pad = n => String(n).padStart(2,'0');
   return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
@@ -2902,6 +3139,56 @@ function drawBrushCursorOver(pt){
   octx.stroke();
 }
 
+/* ============================================================
+   3D SPIN
+   Drag the sheet to orbit a 3D system (Lorenz, Rössler, Aizawa)
+   around and find the best angle before you commit to it.
+   ============================================================ */
+let spinning = false, spinLast = null;
+function is3DSystem(){
+  return state.mode === 'generate' && SYSTEMS[state.gen.system] && SYSTEMS[state.gen.system].kind === 'ode';
+}
+function updateSpinUI(){
+  const on = is3DSystem();
+  $('#paper').classList.toggle('spinnable', on);
+  $('#spin3d').hidden = !on;
+  $('#autoSpinRow').hidden = !on;
+}
+function updatePlayButton(){
+  $('#playGrowth').textContent = state.growth.playing ? '■ Stop' : '▶ Play growth';
+  $('#playGrowth').setAttribute('aria-pressed', String(state.growth.playing));
+}
+function togglePlayGrowth(){
+  state.growth.playing = !state.growth.playing;
+  updatePlayButton();
+  if (state.growth.playing) render();
+  else stopRun();
+}
+function toggleAutoSpin(){
+  state.spin.auto = !state.spin.auto;
+  $('#autoSpinBtn').setAttribute('aria-pressed', String(state.spin.auto));
+  if (state.spin.auto) render();
+}
+function bindSpin(){
+  overlay.addEventListener('pointerdown', e => {
+    if (!is3DSystem()) return;
+    spinning = true;
+    spinLast = { x:e.clientX, y:e.clientY };
+    overlay.setPointerCapture(e.pointerId);
+  });
+  overlay.addEventListener('pointermove', e => {
+    if (!spinning) return;
+    const dx = e.clientX - spinLast.x, dy = e.clientY - spinLast.y;
+    spinLast = { x:e.clientX, y:e.clientY };
+    state.rot3d.y += dx * 0.008;
+    state.rot3d.x = clamp(state.rot3d.x + dy*0.008, -1.5, 1.5);
+    scheduleRender();
+  });
+  const stop = () => { spinning = false; };
+  overlay.addEventListener('pointerup', stop);
+  overlay.addEventListener('pointercancel', stop);
+}
+
 function setTool(t){
   state.tool = t;
   $$('#brushChips .chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.tool === t)));
@@ -2965,7 +3252,20 @@ function clearLayers(){
   render();
 }
 
-const LAYER_BLENDS = [['source-over','Normal'],['multiply','Multiply'],['screen','Lighten']];
+const LAYER_BLENDS = [
+  ['source-over','Normal'],
+  ['multiply','Multiply'],
+  ['screen','Screen'],
+  ['overlay','Overlay'],
+  ['darken','Darken'],
+  ['lighten','Lighten'],
+  ['color-dodge','Color Dodge'],
+  ['color-burn','Color Burn'],
+  ['hard-light','Hard Light'],
+  ['soft-light','Soft Light'],
+  ['difference','Difference'],
+  ['exclusion','Exclusion']
+];
 
 function renderLayers(){
   const host = $('#layerList');
@@ -2981,6 +3281,8 @@ function renderLayers(){
 
     const top = document.createElement('div');
     top.className = 'layer-top';
+    const thumb = document.createElement('img');
+    thumb.className = 'layer-thumb'; thumb.src = L.img.src; thumb.alt = '';
     const vis = document.createElement('input');
     vis.type = 'checkbox'; vis.checked = L.visible;
     vis.addEventListener('change', () => { L.visible = vis.checked; render(); });
@@ -2995,7 +3297,7 @@ function renderLayers(){
     const del = document.createElement('button');
     del.type='button'; del.className='layer-btn layer-del'; del.textContent='×'; del.title='Delete layer';
     del.addEventListener('click', () => { state.layers.splice(i,1); renderLayers(); render(); });
-    top.append(vis, name, up, down, del);
+    top.append(thumb, vis, name, up, down, del);
 
     const bottom = document.createElement('div');
     bottom.className = 'layer-bottom';
@@ -3188,7 +3490,7 @@ function savePreset(){
   if (!name){ setStatus('Name the preset first'); return; }
   const list = loadPresets();
   const snap = capturePreset();
-  list.push({ id: Date.now()+'-'+Math.random().toString(36).slice(2,7), name, mode: snap.mode, data: snap.data });
+  list.push({ id: Date.now()+'-'+Math.random().toString(36).slice(2,7), name, mode: snap.mode, data: snap.data, thumb: makeThumb(120) });
   savePresetsList(list);
   nameInput.value = '';
   renderPresets();
@@ -3244,7 +3546,15 @@ function renderPresets(){
     row.className = 'preset-row';
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'preset-apply'; btn.title = 'Load this preset';
-    btn.innerHTML = '<b>' + escapeHtml(p.name) + '</b><span>' + p.mode + ' · ' + escapeHtml(presetSubtitle(p)) + '</span>';
+    if (p.thumb){
+      const img = document.createElement('img');
+      img.className = 'preset-thumb'; img.src = p.thumb; img.alt = '';
+      btn.appendChild(img);
+    }
+    const text = document.createElement('div');
+    text.className = 'preset-text';
+    text.innerHTML = '<b>' + escapeHtml(p.name) + '</b><span>' + p.mode + ' · ' + escapeHtml(presetSubtitle(p)) + '</span>';
+    btn.appendChild(text);
     btn.addEventListener('click', () => applyPreset(p));
     const del = document.createElement('button');
     del.type = 'button'; del.className = 'preset-del'; del.textContent = '×'; del.title = 'Delete preset';
@@ -3285,6 +3595,7 @@ function importPresetsFile(file){
 let renderTimer = null;
 function scheduleRender(){
   clearTimeout(renderTimer);
+  if (state.mode === 'image') setStatus('Rendering…');
   renderTimer = setTimeout(render, 70);
 }
 function render(){
@@ -3303,7 +3614,9 @@ function setMode(m){
   $('#fieldSel').parentElement.hidden = m !== 'field';
   $('#pickTitle').firstChild.textContent = m === 'curve' ? 'Curve' : m === 'field' ? 'Field' : 'System';
   $('#paper').classList.toggle('painting', state.tool !== 'off' && m === 'image');
-  if (m === 'image') selectEffect(state.effect);
+  $('#growthPlay').hidden = m !== 'generate';
+  if (m !== 'generate') updateSpinUI();
+  if (m === 'image'){ renderEffectChips(); renderEffectPanels(); render(); }
   else if (m === 'curve') selectCurve(state.curve.key);
   else if (m === 'field') selectField(state.field.key);
   else selectSystem(state.gen.system);
@@ -3311,16 +3624,72 @@ function setMode(m){
 
 function selectEffect(key){
   state.effect = key;
+  state.activeEffects = [key];
   state.fxAll[key] = state.fxAll[key] || {};
   state.fx = state.fxAll[key];
-  $$('#effectChips .chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.k === key)));
-  $('#fxTag').textContent = EFFECTS[key].label;
-  const host = $('#fxControls');
-  host.innerHTML = '<p class="hint">' + EFFECTS[key].note + '</p>';
-  const box = document.createElement('div');
-  host.appendChild(box);
-  buildControls(box, EFFECTS[key].controls, state.fx, scheduleRender);
+  renderEffectChips();
+  renderEffectPanels();
   render();
+}
+
+function toggleCombineEffect(key){
+  const idx = state.activeEffects.indexOf(key);
+  if (idx >= 0){
+    if (state.activeEffects.length === 1){ setStatus('Keep at least one treatment active'); return; }
+    state.activeEffects.splice(idx,1);
+  } else {
+    state.fxAll[key] = state.fxAll[key] || {};
+    state.activeEffects.push(key);
+    state.effect = key;
+  }
+  renderEffectChips();
+  renderEffectPanels();
+  render();
+}
+
+function renderEffectChips(){
+  $$('#effectChips .chip').forEach(c => c.setAttribute('aria-pressed', String(state.activeEffects.includes(c.dataset.k))));
+}
+
+function renderEffectPanels(){
+  const host = $('#fxControls');
+  host.innerHTML = '';
+  if (state.activeEffects.length <= 1){
+    const key = state.activeEffects[0] || state.effect;
+    state.fxAll[key] = state.fxAll[key] || {};
+    state.fx = state.fxAll[key];
+    $('#fxTag').textContent = EFFECTS[key].label;
+    const hint = document.createElement('p');
+    hint.className = 'hint'; hint.textContent = EFFECTS[key].note;
+    host.appendChild(hint);
+    const box = document.createElement('div');
+    host.appendChild(box);
+    buildControls(box, EFFECTS[key].controls, state.fxAll[key], scheduleRender);
+    return;
+  }
+  $('#fxTag').textContent = state.activeEffects.length + ' combined';
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.textContent = 'Every active treatment renders on its own pass and stacks together, in the order picked.';
+  host.appendChild(hint);
+  state.activeEffects.forEach(key => {
+    state.fxAll[key] = state.fxAll[key] || {};
+    const wrap = document.createElement('div');
+    wrap.className = 'fx-combo';
+    const head = document.createElement('div');
+    head.className = 'fx-combo-head';
+    const name = document.createElement('b'); name.textContent = EFFECTS[key].label;
+    const rm = document.createElement('button');
+    rm.type = 'button'; rm.className = 'fx-combo-rm'; rm.textContent = '×'; rm.title = 'Remove from the mix';
+    rm.addEventListener('click', () => toggleCombineEffect(key));
+    head.append(name, rm);
+    const note = document.createElement('p');
+    note.className = 'hint'; note.textContent = EFFECTS[key].note;
+    const box = document.createElement('div');
+    wrap.append(head, note, box);
+    host.appendChild(wrap);
+    buildControls(box, EFFECTS[key].controls, state.fxAll[key], scheduleRender);
+  });
 }
 
 const RENDER_SCHEMA = [
@@ -3353,6 +3722,7 @@ function selectSystem(key){
   const box = document.createElement('div');
   host.appendChild(box);
   buildControls(box, sys.dials, state.genP, scheduleRender);
+  updateSpinUI();
   render();
 }
 
@@ -3433,6 +3803,120 @@ function checkPair(t){
     throw new Error('Both lines have to work out to a number');
 }
 
+/* ============================================================
+   SHAPE LIBRARY
+   A handful of built-in flash motifs — load one straight in as
+   the source image, the same as dropping a photo.
+   ============================================================ */
+const SHAPE_LIBRARY = {
+  star: { label:'Star', draw:(ctx,S) => {
+    const cx=S/2, cy=S/2, rOuter=S*0.42, rInner=S*0.165, spikes=5;
+    ctx.beginPath();
+    for (let i=0; i<spikes*2; i++){
+      const a = i/(spikes*2)*TAU - Math.PI/2;
+      const r = i%2===0 ? rOuter : rInner;
+      const x = cx+Math.cos(a)*r, y = cy+Math.sin(a)*r;
+      i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.closePath(); ctx.fill();
+  }},
+  flower: { label:'Flower', draw:(ctx,S) => {
+    const cx=S/2, cy=S/2, petals=6, pr=S*0.22, dist=S*0.19;
+    for (let i=0; i<petals; i++){
+      const a = i/petals*TAU;
+      ctx.beginPath();
+      ctx.ellipse(cx+Math.cos(a)*dist, cy+Math.sin(a)*dist, pr, pr*0.6, a, 0, TAU);
+      ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(cx,cy,S*0.11,0,TAU); ctx.fill();
+  }},
+  moon: { label:'Moon', draw:(ctx,S) => {
+    const cx=S/2, cy=S/2, r1=S*0.32, r2=r1*0.72, dx=r1-r2;
+    ctx.beginPath();
+    ctx.arc(cx,cy,r1,0,TAU);
+    ctx.moveTo(cx+dx+r2, cy);
+    ctx.arc(cx+dx,cy,r2,0,TAU,true);
+    ctx.fill('evenodd');
+  }},
+  sun: { label:'Sun', draw:(ctx,S) => {
+    const cx=S/2, cy=S/2, r=S*0.19, rays=12, rayLen=S*0.15, rayW=S*0.032;
+    for (let i=0; i<rays; i++){
+      const a = i/rays*TAU;
+      ctx.save();
+      ctx.translate(cx,cy); ctx.rotate(a);
+      ctx.beginPath();
+      ctx.moveTo(-rayW/2, -r-1);
+      ctx.lineTo(rayW/2, -r-1);
+      ctx.lineTo(0, -r-rayLen);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,TAU); ctx.fill();
+  }},
+  cat: { label:'Animal', draw:(ctx,S) => {
+    const cx=S*0.47, cy=S*0.6;
+    ctx.beginPath(); ctx.ellipse(cx,cy,S*0.22,S*0.28,0,0,TAU); ctx.fill();
+    const hx=cx, hy=cy-S*0.33, hr=S*0.14;
+    ctx.beginPath(); ctx.arc(hx,hy,hr,0,TAU); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(hx-hr*0.8, hy-hr*0.5); ctx.lineTo(hx-hr*1.5, hy-hr*1.8); ctx.lineTo(hx-hr*0.05, hy-hr*0.85);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(hx+hr*0.8, hy-hr*0.5); ctx.lineTo(hx+hr*1.5, hy-hr*1.8); ctx.lineTo(hx+hr*0.05, hy-hr*0.85);
+    ctx.closePath(); ctx.fill();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = S*0.065;
+    ctx.beginPath();
+    ctx.moveTo(cx+S*0.17, cy+S*0.24);
+    ctx.bezierCurveTo(cx+S*0.42, cy+S*0.20, cx+S*0.47, cy-S*0.13, cx+S*0.29, cy-S*0.30);
+    ctx.stroke();
+  }}
+};
+
+function loadLibraryShape(key){
+  const spec = SHAPE_LIBRARY[key];
+  if (!spec) return;
+  const S = 900;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,S,S);
+  ctx.fillStyle = '#000'; ctx.strokeStyle = '#000';
+  spec.draw(ctx, S);
+  const img = new Image();
+  img.onload = () => {
+    state.srcImage = img;
+    state.mask = null;
+    state.layers = []; renderLayers();
+    $('#thumb').src = img.src; $('#thumb').hidden = false;
+    $('#srcTag').textContent = spec.label + ' · library';
+    setMode('image');
+    setStatus('Loaded <b>' + spec.label + '</b> from the library');
+  };
+  img.src = c.toDataURL('image/png');
+}
+
+function buildLibraryGrid(){
+  const grid = $('#libraryGrid');
+  if (!grid) return;
+  grid.classList.remove('empty');
+  Object.keys(SHAPE_LIBRARY).forEach(key => {
+    const spec = SHAPE_LIBRARY[key];
+    const prev = document.createElement('canvas');
+    prev.width = 120; prev.height = 120;
+    const pctx = prev.getContext('2d');
+    pctx.fillStyle = '#fff'; pctx.fillRect(0,0,120,120);
+    pctx.fillStyle = '#000'; pctx.strokeStyle = '#000';
+    spec.draw(pctx, 120);
+    const b = document.createElement('button');
+    b.type = 'button'; b.title = spec.label;
+    const img = document.createElement('img');
+    img.src = prev.toDataURL('image/png'); img.alt = spec.label;
+    b.appendChild(img);
+    b.addEventListener('click', () => loadLibraryShape(key));
+    grid.appendChild(b);
+  });
+}
+
 function loadFile(file){
   if (!file || !file.type.startsWith('image/')) return;
   const url = URL.createObjectURL(file);
@@ -3451,11 +3935,11 @@ function loadFile(file){
 
 function boot(){
   const chips = $('#effectChips');
-  Object.keys(EFFECTS).forEach(k => {
+  EFFECT_ORDER.forEach(k => {
     const b = document.createElement('button');
     b.className = 'chip'; b.dataset.k = k; b.textContent = EFFECTS[k].label;
     b.setAttribute('aria-pressed','false');
-    b.addEventListener('click', () => selectEffect(k));
+    b.addEventListener('click', () => { state.combine ? toggleCombineEffect(k) : selectEffect(k); });
     chips.appendChild(b);
   });
 
@@ -3478,11 +3962,29 @@ function boot(){
   csel.addEventListener('change', () => selectCurve(csel.value));
 
   buildControls($('#preControls'), PRE_SCHEMA, state.pre, scheduleRender);
+  $('#preReset').addEventListener('click', () => {
+    PRE_SCHEMA.forEach(c => { state.pre[c.k] = c.v; });
+    buildControls($('#preControls'), PRE_SCHEMA, state.pre, scheduleRender);
+    render();
+    setStatus('Prepare reset to defaults');
+  });
   buildRenderControls();
   buildControls($('#curveControls'), CURVE_SCHEMA, state.curve, scheduleRender);
   buildControls($('#fieldControls'), FIELD_SCHEMA, state.field, scheduleRender);
   buildControls($('#pinControls'), SHEET_SCHEMA, state.sheet, () => {});
   bindEraser();
+  bindSpin();
+  $('#resetSpin').addEventListener('click', () => {
+    state.rot3d.x = 0.35; state.rot3d.y = 0.6;
+    render();
+  });
+  $('#autoSpinBtn').addEventListener('click', toggleAutoSpin);
+  $('#playGrowth').addEventListener('click', togglePlayGrowth);
+  $('#growthLoop').addEventListener('change', e => { state.growth.loop = e.target.checked; });
+  $('#growthDuration').addEventListener('input', () => {
+    state.growth.duration = Number($('#growthDuration').value);
+    $('#growthDurationV').textContent = state.growth.duration.toFixed(1) + ' s';
+  });
   renderLayers();
   $('#layerAdd').addEventListener('click', addLayerFromCurrent);
   $('#layerClear').addEventListener('click', clearLayers);
@@ -3510,8 +4012,19 @@ function boot(){
   $('#crisp').addEventListener('change', e => view.classList.toggle('crisp', e.target.checked));
   $$('#brushChips .chip').forEach(c => c.addEventListener('click', () => setTool(c.dataset.tool)));
   $('#clearMask').addEventListener('click', () => { state.mask = null; octx.clearRect(0,0,overlay.width,overlay.height); render(); });
+  $('#combineFx').addEventListener('change', e => {
+    state.combine = e.target.checked;
+    if (!state.combine && state.activeEffects.length > 1){
+      state.activeEffects = [state.effect];
+      renderEffectChips(); renderEffectPanels(); render();
+    }
+  });
   $('#bgTol').addEventListener('input', () => { $('#bgTolV').textContent = $('#bgTol').value + '%'; });
   $('#removeBg').addEventListener('click', autoRemoveBackground);
+  $('#effectFilter').addEventListener('input', () => {
+    const q = $('#effectFilter').value.trim().toLowerCase();
+    $$('#effectChips .chip').forEach(c => { c.hidden = q.length>0 && !c.textContent.toLowerCase().includes(q); });
+  });
 
   $$('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
@@ -3553,6 +4066,7 @@ function boot(){
   $('#svgBtn').addEventListener('click', exportSVG);
   $('#sendBtn').addEventListener('click', sendToPhoto);
 
+  buildLibraryGrid();
   renderPresets();
   $('#presetSave').addEventListener('click', savePreset);
   $('#presetName').addEventListener('keydown', e => { if (e.key === 'Enter') savePreset(); });
@@ -3568,7 +4082,7 @@ function boot(){
     if (e.key === 'e' && state.mode === 'image') setTool(state.tool === 'erase' ? 'off' : 'erase');
   });
 
-  setMode('generate');
+  setMode('image');
 }
 
 boot();

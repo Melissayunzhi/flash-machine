@@ -71,6 +71,7 @@ textarea{resize:vertical; min-height:32px; line-height:1.5}
 .btn.solid{background:var(--stencil); border-color:var(--stencil); color:var(--on-stencil)}
 .btn.solid:hover{background:var(--stencil-2); border-color:var(--stencil-2); color:var(--on-stencil)}
 .btn[disabled]{opacity:.35; cursor:not-allowed}
+.btn[aria-pressed="true"]{background:var(--stencil); border-color:var(--stencil); color:var(--on-stencil)}
 .btn:focus-visible, .chip:focus-visible{outline:1px solid var(--stencil); outline-offset:2px}
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:6px}
 .stack > *{margin-bottom:6px}
@@ -81,6 +82,9 @@ textarea{resize:vertical; min-height:32px; line-height:1.5}
   letter-spacing:.06em; text-transform:uppercase; color:var(--dim);}
 .chip:hover{color:var(--text)}
 .chip[aria-pressed="true"]{background:var(--stencil); border-color:var(--stencil); color:var(--on-stencil)}
+
+#effectChips{display:grid; grid-template-columns:1fr 1fr; gap:5px}
+#effectChips .chip{text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 
 .check{display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--dim);
   text-transform:uppercase; font-size:10px; letter-spacing:.08em}
@@ -115,11 +119,15 @@ textarea{resize:vertical; min-height:32px; line-height:1.5}
 #view.crisp{image-rendering:pixelated}
 #overlay{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
 .paper.painting #overlay{pointer-events:auto; cursor:none; touch-action:none}
+.paper.spinnable #overlay{pointer-events:auto; cursor:grab; touch-action:none}
+.paper.spinnable #overlay:active{cursor:grabbing}
 
 .preset-row{display:flex; gap:5px; margin-bottom:5px}
 .preset-row:last-child{margin-bottom:0}
 .preset-apply{flex:1; min-width:0; text-align:left; background:none; border:1px solid var(--rule); color:var(--text);
-  cursor:pointer; padding:7px 9px; display:flex; flex-direction:column; gap:2px}
+  cursor:pointer; padding:6px 9px; display:flex; align-items:center; gap:8px}
+.preset-thumb{width:32px; height:32px; flex:0 0 32px; object-fit:contain; border:1px solid var(--rule); background:#fff}
+.preset-text{min-width:0; display:flex; flex-direction:column; gap:2px}
 .preset-apply b{font-weight:400; font-size:10.5px; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .preset-apply span{color:var(--dim); font-size:9px; text-transform:uppercase; letter-spacing:.08em}
 .preset-apply:hover{border-color:var(--stencil); color:var(--stencil)}
@@ -129,6 +137,7 @@ textarea{resize:vertical; min-height:32px; line-height:1.5}
 .layer-row{border:1px solid var(--rule); padding:7px 8px; margin-bottom:6px}
 .layer-row:last-child{margin-bottom:0}
 .layer-top{display:flex; align-items:center; gap:7px}
+.layer-thumb{width:28px; height:28px; flex:0 0 28px; object-fit:cover; border:1px solid var(--rule); background:#fff}
 .layer-top input[type=checkbox]{appearance:none; -webkit-appearance:none; width:13px; height:13px;
   border:1px solid var(--rule); background:var(--ink); cursor:pointer; flex:0 0 13px}
 .layer-top input[type=checkbox]:checked{background:var(--stencil); border-color:var(--stencil)}
@@ -140,6 +149,14 @@ textarea{resize:vertical; min-height:32px; line-height:1.5}
 .layer-bottom{display:flex; gap:6px; margin-top:6px}
 .layer-bottom select{flex:1; padding:4px 6px; font-size:10px}
 .layer-bottom input[type=range]{flex:1}
+
+.fx-combo{border:1px solid var(--rule); padding:9px 10px; margin-bottom:10px}
+.fx-combo:last-child{margin-bottom:0}
+.fx-combo-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:4px}
+.fx-combo-head b{font-weight:400; font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--stencil)}
+.fx-combo-rm{flex:0 0 20px; background:none; border:1px solid var(--rule); color:var(--dim); cursor:pointer; font-size:12px; line-height:1; padding:3px 0}
+.fx-combo-rm:hover{border-color:#ff7a7a; color:#ff7a7a}
+.fx-combo .hint{margin-bottom:8px}
 
 .readout{display:flex; flex-wrap:wrap; justify-content:center; border:1px solid var(--rule); max-width:100%}
 .readout div{padding:7px 13px; border-right:1px solid var(--rule); font-size:10px; letter-spacing:.08em;

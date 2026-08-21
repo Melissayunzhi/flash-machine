@@ -11,8 +11,8 @@
 <header class="bar">
   <div class="mark">Flash<em>/</em>Machine</div>
   <nav class="modes" role="tablist" aria-label="Design source">
-    <button role="tab" data-mode="image" aria-selected="false">Photo</button>
-    <button role="tab" data-mode="generate" aria-selected="true">System</button>
+    <button role="tab" data-mode="image" aria-selected="true">Photo</button>
+    <button role="tab" data-mode="generate" aria-selected="false">System</button>
     <button role="tab" data-mode="curve" aria-selected="false">Curve</button>
     <button role="tab" data-mode="field" aria-selected="false">Field</button>
   </nav>
@@ -51,6 +51,10 @@
         <div class="row" style="margin-top:10px">
           <label class="lab" for="res">Working width <b id="resV">1200 px</b></label>
           <input type="range" id="res" min="400" max="4000" step="100" value="1200">
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label class="lab">Shape library</label>
+          <div class="explore empty" id="libraryGrid" style="grid-template-columns:repeat(5,1fr)"></div>
         </div>
       </div>
     </div>
@@ -98,12 +102,19 @@
 
     <div class="sect" data-only="image">
       <h2>Prepare</h2>
-      <div class="body" id="preControls"></div>
+      <div class="body">
+        <div id="preControls"></div>
+        <button class="btn" id="preReset" style="margin-top:10px">Reset prepare</button>
+      </div>
     </div>
 
     <div class="sect" data-only="image">
       <h2>Treatment</h2>
-      <div class="body"><div class="chips" id="effectChips"></div></div>
+      <div class="body">
+        <input type="text" id="effectFilter" placeholder="Filter treatments…" style="margin-bottom:10px">
+        <label class="check" style="margin-bottom:10px"><input type="checkbox" id="combineFx"> Combine treatments — pick more than one</label>
+        <div class="chips" id="effectChips"></div>
+      </div>
     </div>
 
     <div class="sect" data-only="image">
@@ -139,6 +150,24 @@
         <div class="grid2">
           <button class="btn" id="shuffle" title="Keyboard: R">Shuffle</button>
           <button class="btn" id="reseed">New seed</button>
+        </div>
+        <div id="growthPlay" hidden style="margin-top:10px">
+          <p class="hint">Watch it build from the first point, instead of jumping straight to the finished sheet.</p>
+          <div class="grid2">
+            <button class="btn" id="playGrowth" aria-pressed="false">▶ Play growth</button>
+            <label class="check" style="justify-content:center; border:1px solid var(--rule); padding:9px 10px"><input type="checkbox" id="growthLoop"> Loop</label>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="lab" for="growthDuration">Growth speed <b id="growthDurationV">4.0 s</b></label>
+            <input type="range" id="growthDuration" min="0.5" max="15" step="0.5" value="4">
+          </div>
+        </div>
+        <div id="spin3d" hidden style="margin-top:10px">
+          <p class="hint">This one's 3D — drag the sheet to spin it and find the best angle.</p>
+          <button class="btn" id="resetSpin">Reset view</button>
+          <div id="autoSpinRow" style="margin-top:8px">
+            <button class="btn" id="autoSpinBtn" aria-pressed="false">⟳ Auto-spin</button>
+          </div>
         </div>
       </div>
     </div>
